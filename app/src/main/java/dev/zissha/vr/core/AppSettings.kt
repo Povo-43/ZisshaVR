@@ -25,6 +25,10 @@ data class Settings(
     val faceEnabled: Boolean = true,
     val handEnabled: Boolean = true,
     val segmentationEnabled: Boolean = true,
+    /** Composite the MediaPipe pose skeleton onto the live output (alignment aid). */
+    val skeletonOverlay: Boolean = true,
+    /** Automatically return to LIVE from an auto-triggered FREEZE/PRIVACY once tracking recovers. */
+    val autoRecover: Boolean = true,
     val lodAuto: Boolean = true,
     val forcedLod: Int = 1,
     val avatarUri: String = "",
@@ -53,6 +57,8 @@ class SettingsRepository(private val context: Context) {
         val faceEnabled = booleanPreferencesKey("face_enabled")
         val handEnabled = booleanPreferencesKey("hand_enabled")
         val segmentationEnabled = booleanPreferencesKey("segmentation_enabled")
+        val skeletonOverlay = booleanPreferencesKey("skeleton_overlay")
+        val autoRecover = booleanPreferencesKey("auto_recover")
         val lodAuto = booleanPreferencesKey("lod_auto")
         val forcedLod = intPreferencesKey("forced_lod")
         val avatarUri = stringPreferencesKey("avatar_uri")
@@ -76,6 +82,8 @@ class SettingsRepository(private val context: Context) {
             faceEnabled = p[Keys.faceEnabled] ?: true,
             handEnabled = p[Keys.handEnabled] ?: true,
             segmentationEnabled = p[Keys.segmentationEnabled] ?: true,
+            skeletonOverlay = p[Keys.skeletonOverlay] ?: true,
+            autoRecover = p[Keys.autoRecover] ?: true,
             lodAuto = p[Keys.lodAuto] ?: true,
             forcedLod = p[Keys.forcedLod] ?: 1,
             avatarUri = p[Keys.avatarUri] ?: "",
@@ -101,6 +109,8 @@ class SettingsRepository(private val context: Context) {
                 faceEnabled = p[Keys.faceEnabled] ?: true,
                 handEnabled = p[Keys.handEnabled] ?: true,
                 segmentationEnabled = p[Keys.segmentationEnabled] ?: true,
+                skeletonOverlay = p[Keys.skeletonOverlay] ?: true,
+                autoRecover = p[Keys.autoRecover] ?: true,
                 lodAuto = p[Keys.lodAuto] ?: true,
                 forcedLod = p[Keys.forcedLod] ?: 1,
                 avatarUri = p[Keys.avatarUri] ?: "",
@@ -122,6 +132,8 @@ class SettingsRepository(private val context: Context) {
             p[Keys.faceEnabled] = next.faceEnabled
             p[Keys.handEnabled] = next.handEnabled
             p[Keys.segmentationEnabled] = next.segmentationEnabled
+            p[Keys.skeletonOverlay] = next.skeletonOverlay
+            p[Keys.autoRecover] = next.autoRecover
             p[Keys.lodAuto] = next.lodAuto
             p[Keys.forcedLod] = next.forcedLod
             p[Keys.avatarUri] = next.avatarUri

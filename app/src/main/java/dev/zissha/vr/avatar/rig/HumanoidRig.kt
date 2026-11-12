@@ -148,6 +148,9 @@ class HumanoidRig(val doc: GltfDocument, val vrm: VrmData) {
      * and scaled, and all descendants inherit by recomputation.
      */
     private fun applyRootMotion() {
+        // Root motion is now a post-skinning model transform (PoseRigger.modelOffset/modelScale),
+        // so the rig itself no longer shifts its root. Keep this a cheap no-op path.
+        if (rootScale == 1f && rootTranslation.length() < 1e-6f) return
         val hips = humanoidBones["hips"] ?: return
         val hipsNode = nodes[hips]
         val world = worldMatrices[hips]

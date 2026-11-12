@@ -125,8 +125,17 @@ class AvatarController(val renderer: AvatarRenderer) {
         }
     }
 
-    /** Draw with the tracked root offset baked into the rig (root motion lives in skin matrices). */
+    /**
+     * Draw with the tracking-derived model transform (scale about the avatar hips + translation)
+     * so the avatar lands on the tracked person in the composite.
+     */
     fun draw() {
-        renderer.draw(viewProj, Vec3.ZERO, 1f, Vec3(-0.4f, 0.8f, 0.6f).normalized())
+        val rg = rigger
+        renderer.draw(
+            viewProj,
+            rg?.modelOffset ?: Vec3.ZERO,
+            rg?.modelScale ?: 1f,
+            Vec3(-0.4f, 0.8f, 0.6f).normalized(),
+        )
     }
 }

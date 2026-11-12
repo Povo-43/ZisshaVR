@@ -224,6 +224,11 @@ class Engine private constructor() {
         lifecycleScope?.launch {
             gate.canRecover.collect { canRecover ->
                 _uiState.value = _uiState.value.copy(canRecover = canRecover)
+                // Optional auto-recovery: only for states entered *automatically* (trigger != null),
+                // never for a mode the user chose explicitly, and only once tracking is verified.
+                if (canRecover && currentSettings.autoRecover && gate.trigger.value != null) {
+                    setMode(OutputMode.LIVE)
+                }
             }
         }
         lifecycleScope?.launch {
@@ -355,6 +360,7 @@ class Engine private constructor() {
         }
         trackingEngine.segmentationEnabled = settings.segmentationEnabled
         glRenderer.segmentationEnabled = settings.segmentationEnabled
+        glRenderer.skeletonOverlay = settings.skeletonOverlay
         if (settings.bleEnabled != prev.bleEnabled) {
             if (settings.bleEnabled) {
                 peripheralManager?.start()

@@ -74,6 +74,9 @@ class GLRenderer(
     @Volatile var trackingHealthy: Boolean = false
     @Volatile var segmentationEnabled: Boolean = true
 
+    /** Composite the detected pose skeleton onto the live output (debug / alignment aid). */
+    @Volatile var skeletonOverlay: Boolean = false
+
     private var lastRenderUptimeMs = 0L
     private var lastCameraFrameTsMs = 0L
     private var frameCount = 0L
@@ -276,6 +279,7 @@ class GLRenderer(
         val egl = this.egl ?: return
         val compositor = this.compositor ?: return
         val st = cameraSurfaceTexture ?: return
+        compositor.skeletonOverlay = skeletonOverlay
         if (minFrameIntervalMs > 0 && nowMs - lastRenderUptimeMs < minFrameIntervalMs && !fromTick) {
             return
         }

@@ -203,6 +203,12 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 )
                 InfoRow("現在のLOD", "L${ui.stats.lod}")
                 InfoRow("負荷制御", "L${ui.governorLevel} (${ui.thermalStatusText})")
+                ToggleRow(
+                    label = "骨格を重ねて表示",
+                    description = "MediaPipeが検出した骨格を映像に合成します(位置合わせの確認用)",
+                    checked = settings.skeletonOverlay,
+                    onCheckedChange = { v -> update { it.copy(skeletonOverlay = v) } },
+                )
             }
 
             SectionCard(title = "アバター") {
@@ -293,6 +299,15 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 } else {
                     InfoRow("設定", "既定画像")
                 }
+            }
+
+            SectionCard(title = "安全") {
+                ToggleRow(
+                    label = "自動で復帰",
+                    description = "自動で停止/プライバシーになった後、トラッキングが安定したら自動でLIVEへ戻します",
+                    checked = settings.autoRecover,
+                    onCheckedChange = { v -> update { it.copy(autoRecover = v) } },
+                )
             }
 
             SectionCard(title = "録画・配信") {

@@ -47,6 +47,19 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
     private var rootScale = 1f
     private var initialized = false
 
+    /**
+     * World-space model transform derived from tracking. The renderer applies it after skinning
+     * (`world = skinned * modelScale + modelOffset`), which scales the avatar about its hips and
+     * places those hips on the tracked person's hips.
+     */
+    var modelScale: Float = 1f
+        private set
+    var modelOffset: Vec3 = Vec3.ZERO
+        private set
+
+    /** Avatar rest hips position (pivot of the model transform). */
+    private var restHip: Vec3 = Vec3(0f, 0.9f, 0f)
+
     init {
         fun node(name: String) = rig.boneNode(name)
         node("leftUpperArm")?.let { l ->
@@ -89,6 +102,7 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         if (hips != null && footL != null && footR != null) {
             avatarHipsToFeet = hips.y - ((footL.y + footR.y) / 2f).coerceAtLeast(0.1f)
         }
+        rig.boneNode("hips")?.let { restHip = rig.nodes[it].restWorld.extractTranslation() }
     }
 
     /** The underlying rig; the renderer calls [rig.evaluate] after [applyPose]. */
@@ -106,124 +120,135 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         val w = pose.worldLandmarks
         val conv = rig.viewToAvatar
 
-        // ---------------- root placement ----------------
-        val shoulderDx = lm[11].x - lm[12].x
-        val shoulderDy = lm[11].y - lm[12].y
-        val shoulderW = kotlin.math.hypot(shoulderDx.toDouble(), shoulderDy.toDouble()).toFloat()
-        val hipCx = (lm[23].x + lm[24].x) / 2f
-        val hipCy = (lm[23].y + lm[24].y) / 2f
-        val ankleVisible = lm[27].visibility > 0.4f && lm[28].visibility > 0.4f
+        fun visible(i: Int, thr: Float = 0.3f): Boolean =
+            i in lm.indices && lm[i].visibility >= thr
 
-        val personShoulderWorld = shoulderW * viewWidth
-        var targetScale = (personShoulderWorld / avatarShoulderWidth).coerceIn(0.35f, 2.5f) * scaleMultiplier
-        var targetPos = Vec3(
-            x = ((hipCx - 0.5f) * viewWidth) * (if (rig.facesViewer) 1f else -1f),
-            y = cameraHeight + (0.5f - hipCy) * viewHeight + avatarHipsToFeet * targetScale,
-            z = 0f,
-        )
-        if (ankleVisible) {
-            // feet on the ground: place the root so the ankles land slightly above y=0
-            val ankleCy = (lm[27].y + lm[28].y) / 2f
-            val ankleWorldY = cameraHeight + (0.5f - ankleCy) * viewHeight
-            targetPos = Vec3(targetPos.x, ankleWorldY + avatarHipsToFeet * targetScale - 0.03f, 0f)
+        fun wZ(i: Int): Float = if (i in w.indices) w[i].z else 0f
+
+        /**
+         * View-space direction. The tracking image shares the composite UV mapping, so image-x
+         * (normalized) spans viewWidth world units and image-y (normalized, y down) spans
+         * viewHeight world units. Depth comes from the world landmark z (meters) with a tunable
+         * sign. Using the normalized image landmarks for x/y guarantees the avatar follows the
+         * silhouette that is actually displayed.
+         */
+        fun viewDir(dxN: Float, dyN: Float, dz: Float): Vec3 =
+            conv.rotate(Vec3(dxN * viewWidth, -dyN * viewHeight, dz * Z_SIGN))
+
+        fun segmentDir(from: Int, to: Int): Vec3? {
+            if (!visible(from) || !visible(to)) return null
+            val v = viewDir(lm[to].x - lm[from].x, lm[to].y - lm[from].y, wZ(to) - wZ(from))
+            return if (v.length() > 1e-5f) v.normalized() else null
         }
-        if (!initialized) {
-            rootPos = targetPos
-            rootScale = targetScale
-            initialized = true
-        } else {
-            val k = (dt * 12f).coerceIn(0.05f, 1f)
-            rootPos = Vec3(
-                rootPos.x + (targetPos.x - rootPos.x) * k,
-                rootPos.y + (targetPos.y - rootPos.y) * k,
-                0f,
+
+        // ---------------- root placement: hips on the tracked hip, scale from shoulders --------
+        val shouldersOk = visible(11) && visible(12)
+        val hipsOk = visible(23) && visible(24)
+        if (shouldersOk && hipsOk) {
+            val sdx = (lm[11].x - lm[12].x) * viewWidth
+            val sdy = (lm[11].y - lm[12].y) * viewHeight
+            val personShoulderWorld = kotlin.math.hypot(sdx.toDouble(), sdy.toDouble()).toFloat()
+            val hipCx = (lm[23].x + lm[24].x) / 2f
+            val hipCy = (lm[23].y + lm[24].y) / 2f
+            val targetScale =
+                (personShoulderWorld / avatarShoulderWidth).coerceIn(0.3f, 2.5f) * scaleMultiplier
+            val targetHip = Vec3(
+                x = (hipCx - 0.5f) * viewWidth * (if (rig.facesViewer) 1f else -1f),
+                y = cameraHeight - (hipCy - 0.5f) * viewHeight,
+                z = 0f,
             )
-            rootScale += (targetScale - rootScale) * k
+            if (!initialized) {
+                rootPos = targetHip
+                rootScale = targetScale
+                initialized = true
+            } else {
+                val k = (dt * 12f).coerceIn(0.05f, 1f)
+                rootPos = Vec3(
+                    rootPos.x + (targetHip.x - rootPos.x) * k,
+                    rootPos.y + (targetHip.y - rootPos.y) * k,
+                    0f,
+                )
+                rootScale += (targetScale - rootScale) * k
+            }
         }
-        rig.rootTranslation = rootPos
-        rig.rootScale = rootScale
+        // Scale about the rest hips, then translate so they land on the tracked hips.
+        modelScale = rootScale
+        modelOffset = Vec3(
+            rootPos.x - restHip.x * rootScale,
+            rootPos.y - restHip.y * rootScale,
+            rootPos.z - restHip.z * rootScale,
+        )
 
         // ---------------- torso ----------------
-        // world-space directions from landmarks (view space: x right, y down, z toward viewer)
-        fun toWorld(lmX: Float, lmY: Float, lmZ: Float): Vec3 {
-            val view = Vec3(lmX, -lmY, lmZ * Z_SIGN)
-            return conv.rotate(view)
-        }
-
-        val hipMidW = toWorld(
-            (w[23].x + w[24].x) / 2f, (w[23].y + w[24].y) / 2f, (w[23].z + w[24].z) / 2f,
-        )
-        val shoulderMidW = toWorld(
-            (w[11].x + w[12].x) / 2f, (w[11].y + w[12].y) / 2f, (w[11].z + w[12].z) / 2f,
-        )
-        val torsoUp = (shoulderMidW - hipMidW).normalized()
-
-        rig.boneNode("hips")?.let { hipsNode ->
-            val restUp = restTorsoUp ?: Vec3(0f, 1f, 0f)
-            val restWorldRot = rig.nodes[hipsNode].restWorld.extractRotation()
-            rig.worldRotationOverride[hipsNode] = Quat.fromToRotation(restUp, torsoUp) * restWorldRot
-        }
-        rig.boneNode("spine")?.let { spineNode ->
-            val restWorldRot = rig.nodes[spineNode].restWorld.extractRotation()
-            rig.worldRotationOverride[spineNode] = Quat.fromToRotation(Vec3(0f, 1f, 0f), torsoUp) * restWorldRot
+        if (shouldersOk && hipsOk) {
+            val torsoUp = viewDir(
+                ((lm[11].x + lm[12].x) / 2f) - ((lm[23].x + lm[24].x) / 2f),
+                ((lm[11].y + lm[12].y) / 2f) - ((lm[23].y + lm[24].y) / 2f),
+                ((wZ(11) + wZ(12)) / 2f) - ((wZ(23) + wZ(24)) / 2f),
+            )
+            if (torsoUp.length() > 1e-5f) {
+                val up = torsoUp.normalized()
+                rig.boneNode("hips")?.let { hipsNode ->
+                    val restUp = restTorsoUp ?: Vec3(0f, 1f, 0f)
+                    val restWorldRot = rig.nodes[hipsNode].restWorld.extractRotation()
+                    rig.worldRotationOverride[hipsNode] = Quat.fromToRotation(restUp, up) * restWorldRot
+                }
+                rig.boneNode("spine")?.let { spineNode ->
+                    val restWorldRot = rig.nodes[spineNode].restWorld.extractRotation()
+                    rig.worldRotationOverride[spineNode] =
+                        Quat.fromToRotation(Vec3(0f, 1f, 0f), up) * restWorldRot
+                }
+            }
         }
 
         // ---------------- arms ----------------
-        driveBone("leftUpperArm", w[11], w[13], restUpperArmL, ::toWorld)
-        driveBone("leftLowerArm", w[13], w[15], restLowerArmL, ::toWorld)
-        driveBone("rightUpperArm", w[12], w[14], restUpperArmR, ::toWorld)
-        driveBone("rightLowerArm", w[14], w[16], restLowerArmR, ::toWorld)
+        driveBone("leftUpperArm", segmentDir(11, 13), restUpperArmL)
+        driveBone("leftLowerArm", segmentDir(13, 15), restLowerArmL)
+        driveBone("rightUpperArm", segmentDir(12, 14), restUpperArmR)
+        driveBone("rightLowerArm", segmentDir(14, 16), restLowerArmR)
 
         // ---------------- legs ----------------
-        driveBone("leftUpperLeg", w[23], w[25], restUpperLegL, ::toWorld)
-        driveBone("leftLowerLeg", w[25], w[27], restLowerLegL, ::toWorld)
-        driveBone("rightUpperLeg", w[24], w[26], restUpperLegR, ::toWorld)
-        driveBone("rightLowerLeg", w[26], w[28], restLowerLegR, ::toWorld)
+        driveBone("leftUpperLeg", segmentDir(23, 25), restUpperLegL)
+        driveBone("leftLowerLeg", segmentDir(25, 27), restLowerLegL)
+        driveBone("rightUpperLeg", segmentDir(24, 26), restUpperLegR)
+        driveBone("rightLowerLeg", segmentDir(26, 28), restLowerLegR)
 
         // feet: ankle -> foot index
-        driveBone("leftFoot", w[27], w[31], Vec3(0f, -1f, 0f), ::toWorld)
-        driveBone("rightFoot", w[28], w[32], Vec3(0f, -1f, 0f), ::toWorld)
+        driveBone("leftFoot", segmentDir(27, 31), Vec3(0f, -1f, 0f))
+        driveBone("rightFoot", segmentDir(28, 32), Vec3(0f, -1f, 0f))
 
         // ---------------- head ----------------
-        val eyeL = w[2]
-        val eyeR = w[5]
-        val mouthL = w[9]
-        val mouthR = w[10]
-        var right = toWorld(eyeL.x - eyeR.x, eyeL.y - eyeR.y, eyeL.z - eyeR.z)
-        var up = toWorld(
-            (eyeL.x + eyeR.x) / 2f - (mouthL.x + mouthR.x) / 2f,
-            (eyeL.y + eyeR.y) / 2f - (mouthL.y + mouthR.y) / 2f,
-            (eyeL.z + eyeR.z) / 2f - (mouthL.z + mouthR.z) / 2f,
-        )
-        right = right.normalized()
-        up = up.normalized()
-        if (right.length() > 1e-5f && up.length() > 1e-5f) {
-            // orthonormalize
-            up = (up - right * (right.dot(up))).normalized()
-            val forward = right.cross(up).normalized()
-            val basis = Mat4().setIdentity()
-            basis.m[0] = right.x; basis.m[1] = right.y; basis.m[2] = right.z
-            basis.m[4] = up.x; basis.m[5] = up.y; basis.m[6] = up.z
-            basis.m[8] = forward.x; basis.m[9] = forward.y; basis.m[10] = forward.z
-            val headQuat = basis.extractRotation()
-            rig.boneNode("neck")?.let { rig.worldRotationOverride[it] = headQuat }
-            rig.boneNode("head")?.let { rig.worldRotationOverride[it] = headQuat }
+        if (visible(2) && visible(5) && visible(9) && visible(10)) {
+            var right = viewDir(lm[2].x - lm[5].x, lm[2].y - lm[5].y, wZ(2) - wZ(5))
+            var up = viewDir(
+                (lm[2].x + lm[5].x) / 2f - (lm[9].x + lm[10].x) / 2f,
+                (lm[2].y + lm[5].y) / 2f - (lm[9].y + lm[10].y) / 2f,
+                (wZ(2) + wZ(5)) / 2f - (wZ(9) + wZ(10)) / 2f,
+            )
+            right = right.normalized()
+            up = up.normalized()
+            if (right.length() > 1e-5f && up.length() > 1e-5f) {
+                // orthonormalize
+                up = (up - right * (right.dot(up))).normalized()
+                val forward = right.cross(up).normalized()
+                val basis = Mat4().setIdentity()
+                basis.m[0] = right.x; basis.m[1] = right.y; basis.m[2] = right.z
+                basis.m[4] = up.x; basis.m[5] = up.y; basis.m[6] = up.z
+                basis.m[8] = forward.x; basis.m[9] = forward.y; basis.m[10] = forward.z
+                val headQuat = basis.extractRotation()
+                rig.boneNode("neck")?.let { rig.worldRotationOverride[it] = headQuat }
+                rig.boneNode("head")?.let { rig.worldRotationOverride[it] = headQuat }
+            }
         }
     }
 
-    private fun driveBone(
-        boneName: String,
-        from: dev.zissha.vr.tracking.Landmark3,
-        to: dev.zissha.vr.tracking.Landmark3,
-        restDir: Vec3?,
-        toWorld: (Float, Float, Float) -> Vec3,
-    ) {
+    private fun driveBone(boneName: String, desired: Vec3?, restDir: Vec3?) {
         val node = rig.boneNode(boneName) ?: return
         val rest = restDir ?: return
-        val desired = toWorld(to.x - from.x, to.y - from.y, to.z - from.z).normalized()
-        if (desired.length() < 1e-5f) return
+        val d = desired ?: return
+        if (d.length() < 1e-5f) return
         val restWorldRot = rig.nodes[node].restWorld.extractRotation()
-        rig.worldRotationOverride[node] = Quat.fromToRotation(rest, desired) * restWorldRot
+        rig.worldRotationOverride[node] = Quat.fromToRotation(rest, d) * restWorldRot
     }
 
     /** Drive finger bones from a tracked hand. */

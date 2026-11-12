@@ -22,6 +22,8 @@ class SpringBoneSim(
         var initialized = false
         var restDirLocal = Vec3(0f, -1f, 0f)
         var boneLength = 0.07f
+        var hasLastHead = false
+        var lastHead = Vec3()
     }
 
     private val states = HashMap<Int, JointState>() // nodeIndex -> state
@@ -73,14 +75,22 @@ class SpringBoneSim(
                 val restDirWorld = worldNow.transformVector(state.restDirLocal)
                 if (restDirWorld.length() < 1e-6f) continue
                 val restDirWorldN = restDirWorld.normalized()
-                if (!state.initialized) {
+                // Re-seed the tail when the bone head jumps (large pose/root change) or on first
+                // use; otherwise the Verlet tail lags far behind and hair/cloth tears apart.
+                val jumped = state.hasLastHead &&
+                    (headPos - state.lastHead).length() > maxOf(0.15f, state.boneLength * 4f)
+                if (!state.initialized || jumped) {
                     state.tail = headPos + restDirWorldN * state.boneLength
                     state.prevTail = state.tail
                     state.initialized = true
                 }
-                // verlet integration
+                state.hasLastHead = true
+                state.lastHead = headPos
+                // verlet integration (velocity clamped so the tail can never be flung away)
                 val drag = joint.dragForce.coerceIn(0f, 1f)
-                val velocity = (state.tail - state.prevTail) * (1f - drag)
+                var velocity = (state.tail - state.prevTail) * (1f - drag)
+                val vMax = state.boneLength * 0.5f
+                if (velocity.length() > vMax) velocity = velocity.normalized() * vMax
                 state.prevTail = state.tail
                 val gravity = joint.gravityDir.normalized() * joint.gravityPower
                 val idealTail = headPos + restDirWorldN * state.boneLength

@@ -5,6 +5,7 @@ import android.opengl.GLES30
 import android.opengl.GLES11Ext
 import android.util.Log
 import dev.zissha.vr.avatar.render.AvatarController
+import dev.zissha.vr.tracking.Landmark3
 import dev.zissha.vr.tracking.SegmentationResult
 import dev.zissha.vr.tracking.TrackingFrame
 import dev.zissha.protocol.OutputMode
@@ -31,6 +32,15 @@ class Compositor(private val avatarController: AvatarController) {
         const val TRACK_H = dev.zissha.vr.tracking.TrackingEngine.TRACK_H
         const val MASK_SIZE = 256
         private const val RING_FRAMES = 2
+
+        /** Pose landmark index pairs (BlazePose topology) drawn by the debug skeleton overlay. */
+        private val CONNECTIONS = intArrayOf(
+            11, 12, 11, 13, 13, 15, 15, 17, 15, 19, 15, 21,
+            12, 14, 14, 16, 16, 18, 16, 20, 16, 22,
+            11, 23, 12, 24, 23, 24, 23, 25, 25, 27, 27, 29, 27, 31,
+            24, 26, 26, 28, 28, 30, 28, 32,
+            0, 11, 0, 12, 2, 5, 9, 10,
+        )
     }
 
     // programs
@@ -39,10 +49,19 @@ class Compositor(private val avatarController: AvatarController) {
     private var maskTemporalProgram = 0
     private var maskBlurProgram = 0
     private var maskedOverProgram = 0
+    private var skeletonProgram = 0
 
     // quad
     private var quadVbo = 0
     private var quadVao = 0
+
+    // debug skeleton overlay (MediaPipe landmarks composited onto the output)
+    private var skeletonVao = 0
+    private var skeletonVbo = 0
+    private val skeletonCut = FloatArray(64 * 4)
+
+    /** Enabled from settings: draw the detected pose skeleton over the live composite. */
+    @Volatile var skeletonOverlay: Boolean = false
 
     // FBOs
     private var trackFbo: GlUtil.Fbo? = null
@@ -64,6 +83,7 @@ class Compositor(private val avatarController: AvatarController) {
         private set
 
     private var trackingReadback: ByteBuffer? = null
+    private var skeletonBuffer: java.nio.FloatBuffer? = null
     private var lastMaskTs = 0L
 
     // cached uniforms
@@ -75,6 +95,7 @@ class Compositor(private val avatarController: AvatarController) {
         maskTemporalProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.MASK_TEMPORAL_FS)
         maskBlurProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.MASK_BLUR_FS)
         maskedOverProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.MASKED_OVER_FS)
+        skeletonProgram = GlUtil.createProgram(ShaderLib.SKELETON_VS, ShaderLib.SKELETON_FS)
 
         // full-screen quad: two triangles
         val quad = floatArrayOf(
@@ -92,6 +113,15 @@ class Compositor(private val avatarController: AvatarController) {
         )
         quadVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         GLES30.glBindVertexArray(quadVao)
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, 0)
+        GLES30.glBindVertexArray(0)
+
+        // skeleton overlay: dynamic VBO of 2D NDC line endpoints
+        skeletonVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
+        skeletonVbo = IntArray(1).also { GLES30.glGenBuffers(1, it, 0) }[0]
+        GLES30.glBindVertexArray(skeletonVao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, skeletonVbo)
         GLES30.glEnableVertexAttribArray(0)
         GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, 0)
         GLES30.glBindVertexArray(0)
@@ -217,8 +247,58 @@ class Compositor(private val avatarController: AvatarController) {
         if (gateMode == OutputMode.LIVE && trackingHealthy) {
             copyCompositeToRing()
         }
+
+        // ---- pass 6: debug skeleton overlay (MediaPipe landmarks composited onto the output) ----
+        if (skeletonOverlay && gateMode == OutputMode.LIVE) {
+            tracking?.pose?.let {
+                compositeFbo!!.bind()
+                drawSkeletonOverlay(it.landmarks)
+            }
+        }
         GLES30.glBindVertexArray(0)
         return readback
+    }
+
+    /**
+     * Draw the detected pose skeleton (33 landmarks, normalized image coords with y down) as NDC
+     * lines. The tracking image shares the composite's UV mapping, so the normalized coordinates
+     * map straight onto the composite [-1,1] range.
+     */
+    private fun drawSkeletonOverlay(landmarks: List<Landmark3>) {
+        if (landmarks.size < 33) return
+        var w = 0
+        var i = 0
+        while (i < CONNECTIONS.size && w + 4 <= skeletonCut.size) {
+            val a = CONNECTIONS[i]
+            val b = CONNECTIONS[i + 1]
+            i += 2
+            val la = landmarks[a]
+            val lb = landmarks[b]
+            if (la.visibility < 0.3f || lb.visibility < 0.3f) continue
+            skeletonCut[w++] = la.x * 2f - 1f
+            skeletonCut[w++] = 1f - la.y * 2f
+            skeletonCut[w++] = lb.x * 2f - 1f
+            skeletonCut[w++] = 1f - lb.y * 2f
+        }
+        if (w == 0) return
+        var buf = skeletonBuffer
+        if (buf == null || buf.capacity() < w) {
+            buf = ByteBuffer.allocateDirect(skeletonCut.size * 4)
+                .order(ByteOrder.nativeOrder()).asFloatBuffer()
+            skeletonBuffer = buf
+        }
+        buf.clear()
+        buf.put(skeletonCut, 0, w)
+        buf.position(0)
+
+        GLES30.glUseProgram(skeletonProgram)
+        GLES30.glBindVertexArray(skeletonVao)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, skeletonVbo)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, w * 4, buf, GLES30.GL_DYNAMIC_DRAW)
+        uniform(skeletonProgram, "uColor")?.let { GLES30.glUniform4f(it, 0.20f, 1f, 0.35f, 0.9f) }
+        GLES30.glLineWidth(3f)
+        GLES30.glDrawArrays(GLES30.GL_LINES, 0, w / 2)
+        GLES30.glBindVertexArray(0)
     }
 
     /**
@@ -240,6 +320,18 @@ class Compositor(private val avatarController: AvatarController) {
             // nothing to show yet: black frame (never raw camera, spec 7)
             return
         }
+        // Preserve the composite aspect ratio: letterbox/pillarbox instead of stretching the
+        // camera image to whatever shape the preview surface happens to be.
+        val srcAspect = width.toFloat() / height.toFloat()
+        val dstAspect = surfaceWidth.toFloat() / surfaceHeight.toFloat()
+        var vw = surfaceWidth
+        var vh = surfaceHeight
+        if (dstAspect > srcAspect) {
+            vw = (surfaceHeight * srcAspect).toInt().coerceIn(1, surfaceWidth)
+        } else if (dstAspect < srcAspect) {
+            vh = (surfaceWidth / srcAspect).toInt().coerceIn(1, surfaceHeight)
+        }
+        GLES30.glViewport((surfaceWidth - vw) / 2, (surfaceHeight - vh) / 2, vw, vh)
         GLES30.glUseProgram(blitProgram)
         GLES30.glBindVertexArray(quadVao)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
@@ -375,7 +467,12 @@ class Compositor(private val avatarController: AvatarController) {
         privacyTex = 0
         if (quadVbo != 0) GLES30.glDeleteBuffers(1, intArrayOf(quadVbo), 0)
         if (quadVao != 0) GLES30.glDeleteVertexArrays(1, intArrayOf(quadVao), 0)
-        for (p in intArrayOf(cameraProgram, blitProgram, maskTemporalProgram, maskBlurProgram, maskedOverProgram)) {
+        if (skeletonVbo != 0) GLES30.glDeleteBuffers(1, intArrayOf(skeletonVbo), 0)
+        if (skeletonVao != 0) GLES30.glDeleteVertexArrays(1, intArrayOf(skeletonVao), 0)
+        for (p in intArrayOf(
+            cameraProgram, blitProgram, maskTemporalProgram, maskBlurProgram, maskedOverProgram,
+            skeletonProgram,
+        )) {
             if (p != 0) GLES30.glDeleteProgram(p)
         }
         uCache.clear()

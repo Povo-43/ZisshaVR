@@ -183,6 +183,19 @@ void main() {
 }
 """
 
+    // ------------------------------------------------------------ debug skeleton overlay
+    const val SKELETON_VS = """#version 300 es
+    layout(location = 0) in vec2 aPos;   // NDC
+    void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+    """
+
+    const val SKELETON_FS = """#version 300 es
+    precision mediump float;
+    uniform vec4 uColor;
+    out vec4 fragColor;
+    void main() { fragColor = uColor; }
+    """
+
     // ----------------------------------------------------------------- final composite
     /**
      * Draws the already-rendered background (in the FBO) and overlays the avatar layer only
