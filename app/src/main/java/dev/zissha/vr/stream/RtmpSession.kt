@@ -7,6 +7,7 @@ import com.pedro.common.ConnectChecker
 import com.pedro.encoder.input.sources.audio.MicrophoneSource
 import com.pedro.encoder.input.sources.audio.NoAudioSource
 import com.pedro.encoder.input.sources.video.NoVideoSource
+import com.pedro.library.base.recording.RecordController
 import com.pedro.library.rtmp.RtmpStream
 import dev.zissha.vr.core.AppLog
 import java.util.concurrent.atomic.AtomicBoolean
@@ -62,6 +63,9 @@ class RtmpSession(private val context: Context) : ConnectChecker {
     @Volatile var recording = false
         private set
 
+    /** Whether the active session actually prepared an audio track (drives record track select). */
+    private var audioInSession = false
+
     /**
      * Prepare and start streaming.
      * @param baseUrl e.g. rtmp://server/live  @param streamKey appended by the server path
@@ -100,10 +104,12 @@ class RtmpSession(private val context: Context) : ConnectChecker {
                 _state.value = StreamState.FAILED
                 return false
             }
+            audioInSession = false
             if (audioOk) {
-                if (!newStream.prepareAudio(44100, true, 128 * 1000, false, false)) {
-                    AppLog.w("prepareAudio failed; continuing video-only")
-                }
+                audioInSession = runCatching {
+                    newStream.prepareAudio(44100, true, 128 * 1000, false, false)
+                }.getOrDefault(false)
+                if (!audioInSession) AppLog.w("prepareAudio failed; continuing video-only")
             }
             stream = newStream
             encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(newStream.getSurfaceTexture())
@@ -131,14 +137,23 @@ class RtmpSession(private val context: Context) : ConnectChecker {
         audioEnabled: Boolean,
         onStatus: (Boolean, String?) -> Unit,
     ): Boolean {
-        val target = stream ?: run {
-            // no active stream: create a record-only session
+        val target = stream?.takeIf { it.isStreaming } ?: run {
+            // Record-only session: start from a clean, prepared session (a stale stream that is
+            // not streaming would make startRecord fail silently).
+            release()
             if (!createSession(width, height, fps, bitrateKbps, audioEnabled)) return false
             stream!!
         }
         return try {
             encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(target.getSurfaceTexture())
-            target.startRecord(path) { status ->
+            // With NoVideoSource the library defaults to AUDIO-only tracks, which silently drops
+            // all video. Select the tracks explicitly so the composited video is written.
+            val tracks = if (audioInSession) {
+                RecordController.RecordTracks.ALL
+            } else {
+                RecordController.RecordTracks.VIDEO
+            }
+            target.startRecord(path, tracks) { status ->
                 when (status) {
                     com.pedro.library.base.recording.RecordController.Status.RECORDING,
                     com.pedro.library.base.recording.RecordController.Status.RESUMED,
@@ -150,7 +165,7 @@ class RtmpSession(private val context: Context) : ConnectChecker {
                 }
             }
             recording = true
-            AppLog.i("recording started: $path")
+            AppLog.i("recording started (tracks=$tracks): $path")
             true
         } catch (e: Exception) {
             Log.e(TAG, "startRecord failed", e)
@@ -193,8 +208,11 @@ class RtmpSession(private val context: Context) : ConnectChecker {
                 if (audioOk) MicrophoneSource() else NoAudioSource(),
             )
             if (!newStream.prepareVideo(width, height, bitrateKbps * 1000, fps, 2, 0)) return false
+            audioInSession = false
             if (audioOk) {
-                runCatching { newStream.prepareAudio(44100, true, 128 * 1000, false, false) }
+                audioInSession = runCatching {
+                    newStream.prepareAudio(44100, true, 128 * 1000, false, false)
+                }.getOrDefault(false)
             }
             stream = newStream
             true

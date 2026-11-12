@@ -111,6 +111,12 @@ CI(ubuntu-latest + JDK17 + Android SDK 35)での検証状況:
 - **アバターが原点に縮退**: ボーン行列を充填前にアップロードしていた → 充填後にアップロード
 - メイン画面に描画FPS(合成出力)を追加し、推定FPS(トラッキング)と区別
 
+コード解析で修正(v0.1.4、実機未検証):
+
+- **録画に映像が入らない**: RootEncoder 2.8.2 の `startRecord` は `NoVideoSource` の場合に既定で `RecordTracks.AUDIO` を選択するため、映像トラックが一切書き込まれていなかった → `RecordTracks.ALL`(音声あり)/`VIDEO`(音声なし)を明示指定
+- 録画セッションは毎回クリーンに作成(配信中のみ再利用)し、停止済みセッションへの `startRecord` による無言失敗を排除
+- 録画/配信の開始失敗をSnackbarで通知(無言の失敗を解消)
+
 **まだ未検証**の項目と確認すべき内容:
 
 1. カメラ回転・フロントミラーの向き(端末のsensorOrientation差異)→ `GLRenderer.rotationQuarterTurns` / `PoseRigger.Z_SIGN`

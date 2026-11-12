@@ -467,6 +467,7 @@ class Engine private constructor() {
     }
 
     fun startRecording(): Boolean {
+        if (_uiState.value.recording) return true
         val settings = currentSettings
         val (w, h) = if (settings.resolutionIndex == 0) 720 to 1280 else 1080 to 1920
         val file = recordingManager.newRecordingFile()
@@ -484,7 +485,10 @@ class Engine private constructor() {
             }
             _uiState.value = _uiState.value.copy(recording = recordingActive, lastError = error)
         }
-        if (ok) _uiState.value = _uiState.value.copy(recording = true)
+        _uiState.value = _uiState.value.copy(
+            recording = ok || _uiState.value.recording,
+            lastError = if (ok) null else "録画を開始できませんでした(保存先とコーデック設定を確認してください)",
+        )
         return ok
     }
 
@@ -506,7 +510,17 @@ class Engine private constructor() {
             bitrateKbps = settings.videoBitrateKbps,
             audioEnabled = settings.audioEnabled,
         )
-        if (ok) _uiState.value = _uiState.value.copy(streamState = StreamState.CONNECTING)
+        if (ok) {
+            _uiState.value = _uiState.value.copy(streamState = StreamState.CONNECTING, lastError = null)
+        } else {
+            _uiState.value = _uiState.value.copy(
+                lastError = if (settings.rtmpUrl.isBlank()) {
+                    "RTMP URLが未設定です(設定画面で入力してください)"
+                } else {
+                    "配信を開始できませんでした(RTMP設定とネットワークを確認してください)"
+                },
+            )
+        }
         return ok
     }
 
