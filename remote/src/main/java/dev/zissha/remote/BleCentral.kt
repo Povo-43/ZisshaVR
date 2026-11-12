@@ -14,6 +14,7 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
 import dev.zissha.protocol.BleProtocol
@@ -70,6 +71,11 @@ class BleCentral(private val context: Context) {
             _state.value = ConnectionState.FAILED
             return
         }
+        if (!hasScanPermissions()) {
+            Log.w(TAG, "BLUETOOTH_SCAN/CONNECT not granted; scan deferred")
+            _state.value = ConnectionState.FAILED
+            return
+        }
         val scanner = a.bluetoothLeScanner ?: run { _state.value = ConnectionState.FAILED; return }
         _state.value = ConnectionState.SCANNING
         val filters = listOf(
@@ -87,6 +93,19 @@ class BleCentral(private val context: Context) {
     fun stopScan() {
         runCatching { adapter?.bluetoothLeScanner?.stopScan(scanCallback) }
         if (_state.value == ConnectionState.SCANNING) _state.value = ConnectionState.IDLE
+    }
+
+    private fun hasScanPermissions(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return true // legacy: ACCESS_FINE_LOCATION requested by the activity
+        }
+        val ctx = context
+        return androidx.core.content.ContextCompat.checkSelfPermission(
+            ctx, android.Manifest.permission.BLUETOOTH_SCAN,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                ctx, android.Manifest.permission.BLUETOOTH_CONNECT,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
     private val scanCallback = object : ScanCallback() {
