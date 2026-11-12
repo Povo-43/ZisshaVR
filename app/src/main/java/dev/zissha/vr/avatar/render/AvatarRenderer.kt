@@ -290,6 +290,18 @@ class AvatarRenderer {
         uniform("uLightDir")?.let { GLES30.glUniform3f(it, lightDir.x, lightDir.y, lightDir.z) }
         uniform("uBoneTex")?.let { GLES30.glUniform1i(it, 0) }
 
+        // fill skin matrices from the rig *before* uploading: uploading first sent stale/zero
+        // matrices and collapsed every skinned vertex onto the origin.
+        val rig = skinRig
+        if (rig != null) {
+            for (meshGpu in meshes) {
+                if (meshGpu.skinIndex >= 0) {
+                    rig.fillSkinMatrices(meshGpu.skinIndex, boneMatrixBuffer)
+                    break
+                }
+            }
+        }
+
         // upload bone matrices
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, boneTexture)
@@ -302,17 +314,6 @@ class AvatarRenderer {
                 GLES30.GL_TEXTURE_2D, 0, 0, 0, 1, boneTexHeight,
                 GLES30.GL_RGBA, GLES30.GL_FLOAT, fb,
             )
-        }
-
-        // fill skin matrices from the rig
-        val rig = skinRig
-        if (rig != null) {
-            for (meshGpu in meshes) {
-                if (meshGpu.skinIndex >= 0) {
-                    rig.fillSkinMatrices(meshGpu.skinIndex, boneMatrixBuffer)
-                    break
-                }
-            }
         }
 
         // draw opaque, then mask, then blend

@@ -104,6 +104,13 @@ CI(ubuntu-latest + JDK17 + Android SDK 35)での検証状況:
 - PRIVACY画像がGL初期化前に破棄される競合(黒画面)→ 初期化後適用
 - PRIVACYモードから復帰できない問題 → 全モードでトラッキング継続+0.5秒復帰アーム
 
+コード解析で修正(v0.1.3、実機未検証):
+
+- **プレビュー恒久ブラック**: `GLRenderer.setPreviewSurface` がSurfaceHolder所有のSurfaceを`release()`しており、`surfaceCreated`直後の`surfaceChanged`でSurfaceが無効化 → EGLサーフェスを作れず黒。Surfaceは解放せず、同一Surfaceの再通知はスキップ、GL初期化前のSurfaceは初期化後に適用するよう変更
+- **FREEZE/PRIVACYが出力に反映されない**: `glRenderer.gateMode` が更新されていなかった → セーフティゲートのモードをレンダラへ同期(仕様7)
+- **アバターが原点に縮退**: ボーン行列を充填前にアップロードしていた → 充填後にアップロード
+- メイン画面に描画FPS(合成出力)を追加し、推定FPS(トラッキング)と区別
+
 **まだ未検証**の項目と確認すべき内容:
 
 1. カメラ回転・フロントミラーの向き(端末のsensorOrientation差異)→ `GLRenderer.rotationQuarterTurns` / `PoseRigger.Z_SIGN`

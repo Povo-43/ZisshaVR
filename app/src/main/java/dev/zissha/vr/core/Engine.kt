@@ -42,6 +42,8 @@ data class EngineUiState(
     val gateTrigger: String? = null,
     val trackingHealthy: Boolean = false,
     val stats: TrackingStats = TrackingStats(),
+    /** composite output FPS measured on the render thread (preview / encoder health). */
+    val renderFps: Float = 0f,
     val streamState: StreamState = StreamState.IDLE,
     val recording: Boolean = false,
     val thermalStatusText: String = "NONE",
@@ -210,6 +212,8 @@ class Engine private constructor() {
         }
         lifecycleScope?.launch {
             gate.mode.collect { mode ->
+                // Drive the GL output selection (composite / frozen frame / privacy image, spec 7).
+                glRenderer.gateMode = mode
                 _uiState.value = _uiState.value.copy(mode = mode)
             }
         }
@@ -605,6 +609,7 @@ class Engine private constructor() {
     private fun updateUiState() {
         _uiState.value = _uiState.value.copy(
             trackingHealthy = glRenderer.trackingHealthy,
+            renderFps = this.renderFps,
             thermalStatusText = if (::governor.isInitialized) governor.thermalStatusText else "NONE",
             governorLevel = if (::governor.isInitialized) governor.level else 0,
             recording = rtmpSession.recording || _uiState.value.recording,

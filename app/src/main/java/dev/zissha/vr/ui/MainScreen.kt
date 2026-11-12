@@ -268,7 +268,8 @@ private fun StatsRow(ui: EngineUiState) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         StatusPill("LOD ${ui.stats.lod}", neutral, contentColor = neutralInk)
-        StatusPill("FPS %.0f".format(ui.stats.fps), neutral, contentColor = neutralInk)
+        StatusPill("推定 %.0f".format(ui.stats.fps), neutral, contentColor = neutralInk)
+        StatusPill("描画 %.0f".format(ui.renderFps), neutral, contentColor = neutralInk)
         StatusPill(
             "推論 %.0fms".format(ui.stats.poseMs + ui.stats.faceMs + ui.stats.handMs + ui.stats.segmentMs),
             neutral,

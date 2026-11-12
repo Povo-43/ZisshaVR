@@ -50,6 +50,10 @@ class GLRenderer(
 
     private var previewEglSurface: EGLSurface? = null
     private var previewSurface: Surface? = null
+
+    /** Preview surface requested before the GL context was ready (applied in initializeGl). */
+    private var pendingPreviewSurface: Surface? = null
+
     private var encoderEglSurface: EGLSurface? = null
     private var encoderSurface: Surface? = null
 
@@ -117,20 +121,41 @@ class GLRenderer(
         }
     }
 
-    /** Preview surface from the UI thread (SurfaceView). Safe to call anytime. */
+    /**
+     * Preview surface from the UI thread (SurfaceView). Safe to call anytime.
+     *
+     * The UI sends the surface on both surfaceCreated and surfaceChanged; repeat calls with the
+     * same Surface must be a no-op. The Surface itself is owned by the SurfaceView, so it is
+     * never released here (releasing it invalidates the SurfaceView and blanks the preview).
+     */
     fun setPreviewSurface(surface: Surface?) {
         handler.post {
-            releasePreviewSurface()
             val s = surface
+            if (s === previewSurface) return@post
+            releasePreviewSurface()
             if (s != null && s.isValid) {
                 previewSurface = s
-                try {
-                    previewEglSurface = egl?.createWindowSurface(s)
-                } catch (e: Exception) {
-                    Log.e(TAG, "preview surface create failed", e)
-                    previewSurface = null
+                if (egl != null) {
+                    createPreviewEglSurface(s)
+                } else {
+                    // GL thread not initialized yet: remember and apply after initializeGl.
+                    pendingPreviewSurface = s
                 }
             }
+        }
+    }
+
+    private fun createPreviewEglSurface(surface: Surface) {
+        previewEglSurface = try {
+            egl?.createWindowSurface(surface)
+        } catch (e: Exception) {
+            Log.e(TAG, "preview surface create failed", e)
+            null
+        }
+        if (previewEglSurface == null) {
+            Log.w(TAG, "preview EGL surface unavailable; output stays off")
+        } else {
+            Log.i(TAG, "preview EGL surface ready")
         }
     }
 
@@ -204,6 +229,15 @@ class GLRenderer(
             pendingPrivacyBitmap = null
         }
 
+        // A preview surface may have arrived before the context existed; bind it now.
+        pendingPreviewSurface?.let { s ->
+            pendingPreviewSurface = null
+            if (s.isValid) {
+                previewSurface = s
+                createPreviewEglSurface(s)
+            }
+        }
+
         onCameraSurfaceCreated?.invoke(st)
     }
 
@@ -225,8 +259,10 @@ class GLRenderer(
     private fun releasePreviewSurface() {
         previewEglSurface?.let { egl?.destroySurface(it) }
         previewEglSurface = null
-        previewSurface?.release()
+        // The preview Surface is owned by the SurfaceView / SurfaceHolder. Do NOT call
+        // release() on it: that invalidates the SurfaceView and permanently blanks the preview.
         previewSurface = null
+        pendingPreviewSurface = null
     }
 
     private fun releaseEncoderSurface() {
