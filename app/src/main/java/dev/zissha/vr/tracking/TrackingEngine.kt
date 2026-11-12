@@ -68,6 +68,8 @@ class TrackingEngine(private val context: Context) {
 
     private var frameBitmap: Bitmap? = null
     private var lastTsMs = -1L
+    private var poseFailureStreak = 0
+    private var poseCpuFallbackDone = false
 
     private val lod = LodController()
     private val stabilizer = Stabilizer()
@@ -296,9 +298,24 @@ class TrackingEngine(private val context: Context) {
                     val list = lm.map { Landmark3(it.x(), it.y(), it.z(), it.visibility().orElse(1f)) }
                     val worldList = world.map { Landmark3(it.x(), it.y(), it.z(), it.visibility().orElse(1f)) }
                     pose = PoseResult(frame.tsMs, list, worldList)
+                    poseFailureStreak = 0
+                } else {
+                    poseFailureStreak++
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "pose inference failed", e)
+                poseFailureStreak++
+                if (poseFailureStreak == 1) Log.w(TAG, "pose inference failed", e)
+            }
+            // If pose has never produced a result, the GPU delegate may be silently failing on this
+            // device (creation succeeded but inference never does). Retry once on the CPU delegate.
+            if (lastPoseTs == 0L && !poseCpuFallbackDone && poseFailureStreak >= 60) {
+                poseCpuFallbackDone = true
+                Log.w(TAG, "pose never detected; retrying with CPU delegate")
+                runCatching { poseLandmarker?.close() }
+                poseLandmarker = runCatching { createPose(Delegate.CPU) }
+                    .onFailure { Log.e(TAG, "pose CPU fallback failed", it) }
+                    .getOrNull()
+                poseFailureStreak = 0
             }
         }
 

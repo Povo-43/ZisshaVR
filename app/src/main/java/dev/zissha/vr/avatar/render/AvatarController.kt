@@ -33,6 +33,13 @@ class AvatarController(val renderer: AvatarRenderer) {
     /** User scale adjustment (spec 12). */
     @Volatile var scaleMultiplier: Float = 1f
 
+    /** True when the most recent update applied a tracking pose (diagnostics). */
+    @Volatile var poseApplied: Boolean = false
+        private set
+
+    /** Number of mapped humanoid bones (diagnostics; 0 = bone mapping failed). */
+    val boneCount: Int get() = rig?.humanoidBones?.size ?: 0
+
     private var rigger: PoseRigger? = null
     private var spring: SpringBoneSim? = null
     private val exprWeights = ExpressionMapper.ExpressionWeights()
@@ -87,6 +94,7 @@ class AvatarController(val renderer: AvatarRenderer) {
         val rig = this.rig ?: return
         val rigger = this.rigger ?: return
         val pose = tracking?.pose
+        poseApplied = pose != null
         if (pose != null) {
             rigger.scaleMultiplier = scaleMultiplier
             rigger.applyPose(pose, viewWidth, VIEW_HEIGHT, CAM_HEIGHT, dt)

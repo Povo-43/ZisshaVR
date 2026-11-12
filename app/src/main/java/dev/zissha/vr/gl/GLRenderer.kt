@@ -293,11 +293,17 @@ class GLRenderer(
             }
             val tsMs = lastCameraFrameTsMs
 
-            val tracking = if (newFrame && gateMode != OutputMode.PRIVACY) {
-                trackingEngine.frameFor(tsMs, maxAgeMs = 150)
-            } else if (gateMode != OutputMode.PRIVACY) {
-                trackingEngine.frameFor(tsMs, maxAgeMs = 400)
-            } else null
+            // Prefer the tracking result that belongs to this camera frame, but always fall back to
+            // the newest available result so the avatar keeps following even when the exact
+            // timestamp is not in the history window (slow inference / clock skew).
+            val tracking = if (gateMode == OutputMode.PRIVACY) {
+                null
+            } else {
+                val window = if (newFrame) 150L else 400L
+                trackingEngine.frameFor(tsMs, maxAgeMs = window)
+                    ?: trackingEngine.frameFor(tsMs, maxAgeMs = 1000L)
+                    ?: trackingEngine.latest.value
+            }
 
             val dtSec = if (lastRenderUptimeMs == 0L) 0.016f else (nowMs - lastRenderUptimeMs) / 1000f
             val readback = compositor.renderFrame(

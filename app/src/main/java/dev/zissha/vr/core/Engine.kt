@@ -50,6 +50,10 @@ data class EngineUiState(
     val governorLevel: Int = 0,
     val avatarName: String = "",
     val avatarLoading: Boolean = false,
+    /** Mapped humanoid bone count (0 = VRM bone mapping failed). */
+    val avatarBones: Int = 0,
+    /** Whether the latest frame applied a tracking pose to the avatar. */
+    val poseApplied: Boolean = false,
     val bleRunning: Boolean = false,
     val bleToken: String = "",
     val bleConnected: Boolean = false,
@@ -643,6 +647,8 @@ class Engine private constructor() {
             thermalStatusText = if (::governor.isInitialized) governor.thermalStatusText else "NONE",
             governorLevel = if (::governor.isInitialized) governor.level else 0,
             recording = rtmpSession.recording || _uiState.value.recording,
+            avatarBones = if (::glRenderer.isInitialized) glRenderer.avatarController.boneCount else 0,
+            poseApplied = if (::glRenderer.isInitialized) glRenderer.avatarController.poseApplied else false,
         )
     }
 }

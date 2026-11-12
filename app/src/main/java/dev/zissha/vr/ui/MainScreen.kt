@@ -292,6 +292,12 @@ private fun StatsRow(ui: EngineUiState) {
         )
         if (ui.avatarName.isNotEmpty()) {
             StatusPill("アバター ${ui.avatarName}", neutral, contentColor = neutralInk)
+            StatusPill("ボーン ${ui.avatarBones}", neutral, contentColor = neutralInk)
+            StatusPill(
+                if (ui.poseApplied) "ポーズ ○" else "ポーズ ×",
+                if (ui.poseApplied) sem.ok else sem.danger,
+                contentColor = Color.White,
+            )
         }
     }
 }
