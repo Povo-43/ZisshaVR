@@ -84,15 +84,23 @@ class RtmpSession(private val context: Context) : ConnectChecker {
         val fullUrl = buildStreamUrl(baseUrl, streamKey)
         autoRetry.set(true)
         retryCount = 0
+        // RECORD_AUDIO may be revoked: degrade to video-only instead of crashing (spec 15.8)
+        val audioOk = audioEnabled && hasAudioPermission()
+        if (audioEnabled && !audioOk) {
+            AppLog.w("RECORD_AUDIO permission missing; streaming video-only")
+        }
         return try {
-            val newStream = RtmpStream(context, this, NoVideoSource(), if (audioEnabled) MicrophoneSource() else NoAudioSource())
+            val newStream = RtmpStream(
+                context, this, NoVideoSource(),
+                if (audioOk) MicrophoneSource() else NoAudioSource(),
+            )
             val prepared = newStream.prepareVideo(width, height, bitrateKbps * 1000, fps, 2, 0)
             if (!prepared) {
                 AppLog.e("prepareVideo failed")
                 _state.value = StreamState.FAILED
                 return false
             }
-            if (audioEnabled) {
+            if (audioOk) {
                 if (!newStream.prepareAudio(44100, true, 128 * 1000, false, false)) {
                     AppLog.w("prepareAudio failed; continuing video-only")
                 }
@@ -176,9 +184,16 @@ class RtmpSession(private val context: Context) : ConnectChecker {
         audioEnabled: Boolean,
     ): Boolean {
         return try {
-            val newStream = RtmpStream(context, this, NoVideoSource(), if (audioEnabled) MicrophoneSource() else NoAudioSource())
+            val audioOk = audioEnabled && hasAudioPermission()
+            if (audioEnabled && !audioOk) {
+                AppLog.w("RECORD_AUDIO permission missing; session continues video-only")
+            }
+            val newStream = RtmpStream(
+                context, this, NoVideoSource(),
+                if (audioOk) MicrophoneSource() else NoAudioSource(),
+            )
             if (!newStream.prepareVideo(width, height, bitrateKbps * 1000, fps, 2, 0)) return false
-            if (audioEnabled) {
+            if (audioOk) {
                 runCatching { newStream.prepareAudio(44100, true, 128 * 1000, false, false) }
             }
             stream = newStream
@@ -188,6 +203,11 @@ class RtmpSession(private val context: Context) : ConnectChecker {
             false
         }
     }
+
+    private fun hasAudioPermission(): Boolean =
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.RECORD_AUDIO,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     @Synchronized
     fun stopStream() {

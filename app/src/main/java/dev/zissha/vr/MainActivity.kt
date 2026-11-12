@@ -30,7 +30,12 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { }
+    ) { granted ->
+        // start deferred subsystems (BLE peripheral / camera) once permissions are in
+        if (granted.values.any { it } || granted.isEmpty()) {
+            engine.onPermissionsGranted()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +84,8 @@ class MainActivity : ComponentActivity() {
         }
         if (missing.isNotEmpty()) {
             permissionLauncher.launch(missing.toTypedArray())
+        } else {
+            engine.onPermissionsGranted()
         }
     }
 

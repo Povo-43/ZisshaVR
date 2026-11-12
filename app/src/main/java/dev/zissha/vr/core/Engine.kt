@@ -112,6 +112,7 @@ class Engine private constructor() {
     private var renderFps = 0f
     private var frameCounter = 0L
     private var fpsWindowStart = 0L
+    private var cameraBound = false
 
     private val watchdog = object : Runnable {
         override fun run() {
@@ -283,6 +284,7 @@ class Engine private constructor() {
         glRenderer.setOutputSize(outW, outH)
         glRenderer.rotationQuarterTurns = (bound.sensorOrientation / 90) % 4
         glRenderer.mirror = bound.isFront
+        cameraBound = true
         _uiState.value = _uiState.value.copy(previewSizeError = false)
         AppLog.i(
             "camera bound: buffer=${bound.bufferWidth}x${bound.bufferHeight} output=${outW}x$outH " +
@@ -291,6 +293,14 @@ class Engine private constructor() {
     }
 
     private suspend fun restartCamera() {
+        // CAMERA permission must be granted before binding (SecurityException otherwise)
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                appContext, android.Manifest.permission.CAMERA,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            AppLog.w("CAMERA permission not granted; camera start deferred")
+            return
+        }
         try {
             val res = if (currentSettings.resolutionIndex == 0) {
                 1280 to 720
@@ -504,6 +514,24 @@ class Engine private constructor() {
     fun setPreviewSurface(surface: android.view.Surface?) {
         if (::glRenderer.isInitialized) {
             glRenderer.setPreviewSurface(surface)
+        }
+    }
+
+    /**
+     * Called by the UI once runtime permissions were granted (spec: Android 12+ requires
+     * BLUETOOTH_CONNECT/ADVERTISE for GATT server APIs; CAMERA for binding).
+     */
+    fun onPermissionsGranted() {
+        if (!started) return
+        // BLE peripheral: start (or restart) if enabled and not running
+        val bleWanted = currentSettings.bleEnabled
+        val pm = peripheralManager
+        if (bleWanted && pm != null && !pm.running.value) {
+            pm.start()
+        }
+        // Camera: retry binding if the first attempt was deferred due to missing permission
+        if (!cameraBound && ::cameraController.isInitialized) {
+            lifecycleScope?.launch(Dispatchers.Main) { restartCamera() }
         }
     }
 

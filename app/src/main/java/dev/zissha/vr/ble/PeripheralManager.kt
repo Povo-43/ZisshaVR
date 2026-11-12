@@ -1,5 +1,6 @@
 package dev.zissha.vr.ble
 
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
@@ -13,8 +14,11 @@ import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
+import androidx.core.content.ContextCompat
 import dev.zissha.protocol.BleProtocol
 import dev.zissha.protocol.StatusPayload
 import dev.zissha.vr.core.AppLog
@@ -72,6 +76,10 @@ class PeripheralManager(private val context: Context) {
 
     fun start() {
         if (_running.value) return
+        if (!hasBlePermissions()) {
+            AppLog.w("BLE permissions (CONNECT/ADVERTISE) not granted yet; peripheral start deferred")
+            return
+        }
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager ?: return
         val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
@@ -79,10 +87,30 @@ class PeripheralManager(private val context: Context) {
             return
         }
         generateToken()
-        openServer(bluetoothManager)
-        startAdvertising(bluetoothAdapter)
+        try {
+            openServer(bluetoothManager)
+            startAdvertising(bluetoothAdapter)
+        } catch (e: SecurityException) {
+            AppLog.e("BLE peripheral start rejected: ${e.message}")
+            return
+        } catch (e: Exception) {
+            AppLog.e("BLE peripheral start failed: ${e.message}")
+            return
+        }
         _running.value = true
         AppLog.i("BLE peripheral started (token ${_token.value})")
+    }
+
+    /** Runtime BLE permissions required by this device's API level. */
+    private fun hasBlePermissions(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            // legacy BLUETOOTH/BLUETOOTH_ADMIN are normal permissions; location only needed for scanning
+            return true
+        }
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
+            PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     fun stop() {
