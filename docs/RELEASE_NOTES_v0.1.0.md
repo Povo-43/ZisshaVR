@@ -1,0 +1,10 @@
+- MediaPipe GPU トラッキング(Pose 33点 / Face ブレンドシェイプ+頭部姿勢 / Hand 21点×2 / セルフィーセグメンテーション)
+- 動的LOD(距離推定+ヒステリシス)、One Euro Filter・Velocity/Confidence Gate・欠損補間
+- VRM 0.x / 1.0 グラTFパーサ(humanoid・表情プリセット・SpringBone・モーフ)+ テクスチャスキニングGPU描画
+- OpenGL ES 3.0 合成パイプライン: 実写背景+セグメンテーションマスク+アバター層のFBOマルチパス
+- Safety Gate: LIVE / FREEZE(最終安全フレーム静止)/ PRIVACY(画像差し替え)、自動発動+0.5秒復帰アーム+ユーザー操作必須
+- MP4録画(H.264+AAC、MediaCodec/MediaMuxer)と RTMP配信が同一合成フレームを使用
+- ビットレート配信中変更・自動再接続(3回)
+- BLE GATT リモコン(別アプリ): 6桁トークン+暗号化特性認証、CRC16フレーム、ステータス通知
+- 熱状態監視による5段階負荷制御、ローテーションファイルログ、DataStore設定
+- CI: 単体テスト(23件)+ APKビルド / タグで署名リリース

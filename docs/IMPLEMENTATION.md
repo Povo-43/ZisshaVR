@@ -81,7 +81,14 @@
 
 ## 実機テスト(仕様15.6)
 
-CIでコンパイル・単体テスト(:protocol, 数値ライブラリ)を実施。**実機でのカメラ・描画・配信の動作検証は未実施**です。実機で確認すべき項目:
+CI(ubuntu-latest + JDK17 + Android SDK 35)での検証状況:
+
+- ✅ `:protocol` 単体テスト(CRC16、フレームコーデック、JSONステータス)9件グリーン
+- ✅ `:app` 単体テスト(Quaternion/Mat4数値、One Euro Filter特性)14件グリーン
+- ✅ `:app` / `:remote` デバッグAPKビルド成功(compileSdk 35 / minSdk 26)
+- ✅ リリースAPK署名ビルド(CI上のシークレットkeystore)
+
+**実機でのカメラ・描画・配信の動作検証は未実施**です。実機で確認すべき項目:
 
 1. カメラ回転・フロントミラーの向き(端末のsensorOrientation差異)→ `GLRenderer.rotationQuarterTurns` / `PoseRigger.Z_SIGN`
 2. フロントカメラのhandedness反転の妥当性
