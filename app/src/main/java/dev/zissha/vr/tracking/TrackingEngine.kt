@@ -464,8 +464,9 @@ class TrackingEngine(private val context: Context) {
      */
     fun frameFor(tsMs: Long, maxAgeMs: Long = 150): TrackingFrame? {
         synchronized(historyLock) {
-            for (i in history.indices.reversed()) {
-                val f = history.elementAt(i)
+            val snapshot = history.toList()
+            for (i in snapshot.indices.reversed()) {
+                val f = snapshot[i]
                 if (f.tsMs <= tsMs && tsMs - f.tsMs <= maxAgeMs) return f
             }
         }

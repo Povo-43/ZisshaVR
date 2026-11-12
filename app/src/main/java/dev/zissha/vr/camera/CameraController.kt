@@ -30,7 +30,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * CameraX integration (spec 2/6.1). Renders into a SurfaceTexture owned by the GL renderer.
  * Resolution, lens and frame rate are configurable; the actual buffer size is reported back
  * so the compositor can size its FBOs.
- */class CameraController(
+ */
+class CameraController(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
 ) {
@@ -38,13 +39,6 @@ import kotlinx.coroutines.suspendCancellableCoroutine
     companion object {
         private const val TAG = "CameraController"
     }
-
-    data class BoundCamera(
-        val sensorOrientation: Int,
-        val isFront: Boolean,
-        val bufferWidth: Int,
-        val bufferHeight: Int,
-    )
 
     var onBound: ((BoundCamera) -> Unit)? = null
 
@@ -172,3 +166,11 @@ private suspend fun awaitProcessCameraProvider(context: Context): ProcessCameraP
         )
         cont.invokeOnCancellation { future.cancel(false) }
     }
+
+/** Camera binding report (top-level so Engine can import it directly). */
+data class BoundCamera(
+    val sensorOrientation: Int,
+    val isFront: Boolean,
+    val bufferWidth: Int,
+    val bufferHeight: Int,
+)

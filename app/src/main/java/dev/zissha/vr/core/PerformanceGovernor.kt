@@ -66,7 +66,7 @@ class PerformanceGovernor(context: Context) {
             return
         }
         try {
-            pm.addOnThermalStatusChangedListener(mainExecutor(), listener)
+            pm.addThermalStatusListener(mainExecutor(), listener)
             thermalStatus = pm.currentThermalStatus
             applyThermal(thermalStatus)
             registered = true
@@ -80,7 +80,7 @@ class PerformanceGovernor(context: Context) {
         val listener = thermalListener ?: return
         val pm = powerManager ?: return
         try {
-            pm.removeOnThermalStatusChangedListener(listener)
+            pm.removeThermalStatusListener(listener)
         } catch (e: Exception) {
             Log.w(TAG, "failed to unregister thermal listener", e)
         }
