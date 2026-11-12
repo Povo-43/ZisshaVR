@@ -38,7 +38,7 @@ class Compositor(private val avatarController: AvatarController) {
     private var blitProgram = 0
     private var maskTemporalProgram = 0
     private var maskBlurProgram = 0
-    private var compositeProgram = 0
+    private var maskedOverProgram = 0
 
     // quad
     private var quadVbo = 0
@@ -74,7 +74,7 @@ class Compositor(private val avatarController: AvatarController) {
         blitProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.BLIT_FS)
         maskTemporalProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.MASK_TEMPORAL_FS)
         maskBlurProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.MASK_BLUR_FS)
-        compositeProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.COMPOSITE_FS)
+        maskedOverProgram = GlUtil.createProgram(ShaderLib.QUAD_VS, ShaderLib.MASKED_OVER_FS)
 
         // full-screen quad: two triangles
         val quad = floatArrayOf(
@@ -182,32 +182,36 @@ class Compositor(private val avatarController: AvatarController) {
             avatarController.update(tracking, dtSec, springEnabled = true)
             avatarController.draw()
         }
-
         // ---- pass 4: composite ---------------------------------------------------------
+        // background first (camera program fills the FBO), then the avatar layer masked to
+        // the person region with premultiplied blending on top of it.
         compositeFbo!!.bind()
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
-        // background
         if (gateMode != OutputMode.PRIVACY) {
             drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram)
         }
         // avatar layer with person mask
-        GLES30.glUseProgram(compositeProgram)
+        GLES30.glUseProgram(maskedOverProgram)
         GLES30.glBindVertexArray(quadVao)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, avatarFbo!!.texture)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskFboB?.texture ?: 0)
-        uniform(compositeProgram, "uAvatar")?.let { GLES30.glUniform1i(it, 0) }
-        uniform(compositeProgram, "uMask")?.let { GLES30.glUniform1i(it, 1) }
-        uniform(compositeProgram, "uMaskEnabled")?.let {
+        uniform(maskedOverProgram, "uAvatar")?.let { GLES30.glUniform1i(it, 0) }
+        uniform(maskedOverProgram, "uMask")?.let { GLES30.glUniform1i(it, 1) }
+        uniform(maskedOverProgram, "uMaskEnabled")?.let {
             // without mask data the avatar layer is shown with its own alpha over the background
             GLES30.glUniform1f(
                 it, if (segmentationEnabled && maskHasData && gateMode == OutputMode.LIVE) 1f else 0f,
             )
         }
+        // avatarFBO content is premultiplied (rendered over transparent black)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 6)
+        GLES30.glDisable(GLES30.GL_BLEND)
 
         // ---- pass 5: safety gate source selection + ring store --------------------------
         if (gateMode == OutputMode.LIVE && trackingHealthy) {
@@ -371,7 +375,7 @@ class Compositor(private val avatarController: AvatarController) {
         privacyTex = 0
         if (quadVbo != 0) GLES30.glDeleteBuffers(1, intArrayOf(quadVbo), 0)
         if (quadVao != 0) GLES30.glDeleteVertexArrays(1, intArrayOf(quadVao), 0)
-        for (p in intArrayOf(cameraProgram, blitProgram, maskTemporalProgram, maskBlurProgram, compositeProgram)) {
+        for (p in intArrayOf(cameraProgram, blitProgram, maskTemporalProgram, maskBlurProgram, maskedOverProgram)) {
             if (p != 0) GLES30.glDeleteProgram(p)
         }
         uCache.clear()

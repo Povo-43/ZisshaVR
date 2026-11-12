@@ -278,7 +278,11 @@ class AvatarRenderer {
         GLES30.glEnable(GLES30.GL_DEPTH_TEST)
         GLES30.glDepthFunc(GLES30.GL_LEQUAL)
         GLES30.glEnable(GLES30.GL_BLEND)
-        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        // straight-alpha color blending; alpha accumulates as coverage (not squared)
+        GLES30.glBlendFuncSeparate(
+            GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA,
+            GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA,
+        )
 
         uniform("uViewProj")?.let { GLES30.glUniformMatrix4fv(it, 1, false, viewProj.m, 0) }
         uniform("uModelOffset")?.let { GLES30.glUniform3f(it, modelOffset.x, modelOffset.y, modelOffset.z) }

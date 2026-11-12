@@ -185,24 +185,22 @@ void main() {
 
     // ----------------------------------------------------------------- final composite
     /**
-     * Draws the real background, then replaces the person region (mask) with the avatar layer.
+     * Draws the already-rendered background (in the FBO) and overlays the avatar layer only
+     * inside the person mask. Output is straight-alpha; the caller uses premultiplied
+     * blending (ONE, ONE_MINUS_SRC_ALPHA) because the avatar FBO content is premultiplied.
      */
-    const val COMPOSITE_FS = """#version 300 es
+    const val MASKED_OVER_FS = """#version 300 es
 precision mediump float;
 in vec2 vUV;
-uniform sampler2D uBg;      // camera background (already in view space)
-uniform sampler2D uAvatar;  // avatar layer (premultiplied-style RGBA)
+uniform sampler2D uAvatar;  // avatar layer (premultiplied RGBA)
 uniform sampler2D uMask;    // person confidence mask (r channel)
 uniform float uMaskEnabled;
 out vec4 fragColor;
 void main() {
-    vec4 bg = texture(uBg, vUV);
     vec4 av = texture(uAvatar, vUV);
     float m = mix(1.0, texture(uMask, vUV).r, uMaskEnabled);
     m = smoothstep(0.35, 0.65, m);
-    float a = av.a * m;
-    vec3 color = bg.rgb * (1.0 - a) + av.rgb * a;
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(av.rgb, av.a * m);
 }
 """
 }
