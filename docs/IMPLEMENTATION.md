@@ -117,6 +117,11 @@ CI(ubuntu-latest + JDK17 + Android SDK 35)での検証状況:
 - 録画セッションは毎回クリーンに作成(配信中のみ再利用)し、停止済みセッションへの `startRecord` による無言失敗を排除
 - 録画/配信の開始失敗をSnackbarで通知(無言の失敗を解消)
 
+コード解析で修正(v0.1.5、実機未検証):
+
+- **アバターがT-poseで追従しない**: `AvatarController` が `HumanoidRig` を二重生成し、ポーズは `PoseRigger` 内部リグに適用、レンダラは別の未ポーズリグからスキン行列を取得していた → `PoseRigger.humanoidRig` に統一
+- **カメラの向き**: 端末の `sensorOrientation` 依存のズレを補正する設定を追加(回転 自動/0/90/180/270 × ミラー反転)。トラッキング入力にも同じ変換が適用されるため、向きの補正はポーズ精度にも寄与する
+
 **まだ未検証**の項目と確認すべき内容:
 
 1. カメラ回転・フロントミラーの向き(端末のsensorOrientation差異)→ `GLRenderer.rotationQuarterTurns` / `PoseRigger.Z_SIGN`

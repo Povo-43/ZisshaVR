@@ -286,14 +286,25 @@ class Engine private constructor() {
             outH = bound.bufferHeight
         }
         glRenderer.setOutputSize(outW, outH)
-        glRenderer.rotationQuarterTurns = (bound.sensorOrientation / 90) % 4
-        glRenderer.mirror = bound.isFront
+        applyCameraTransform()
         cameraBound = true
         _uiState.value = _uiState.value.copy(previewSizeError = false)
         AppLog.i(
             "camera bound: buffer=${bound.bufferWidth}x${bound.bufferHeight} output=${outW}x$outH " +
                 "sensor=${bound.sensorOrientation} front=${bound.isFront}",
         )
+    }
+
+    /**
+     * Apply the display rotation / mirror for the bound camera, honouring the device-override
+     * settings (spec: sensorOrientation differs per device and could not be fixed blindly).
+     */
+    private fun applyCameraTransform() {
+        val bound = lastBound ?: return
+        val autoTurns = (bound.sensorOrientation / 90) % 4
+        val turns = currentSettings.cameraRotationOverride.takeIf { it in 0..3 } ?: autoTurns
+        glRenderer.rotationQuarterTurns = turns
+        glRenderer.mirror = bound.isFront != currentSettings.cameraMirrorInverted
     }
 
     private suspend fun restartCamera() {
@@ -332,6 +343,11 @@ class Engine private constructor() {
             settings.targetFps != prev.targetFps
         ) {
             lifecycleScope?.launch(Dispatchers.Main) { restartCamera() }
+        }
+        if (settings.cameraRotationOverride != prev.cameraRotationOverride ||
+            settings.cameraMirrorInverted != prev.cameraMirrorInverted
+        ) {
+            applyCameraTransform()
         }
         trackingEngine.segmentationEnabled = settings.segmentationEnabled
         glRenderer.segmentationEnabled = settings.segmentationEnabled

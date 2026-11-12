@@ -157,6 +157,24 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                     selected = settings.targetFps,
                     onSelect = { v -> update { it.copy(targetFps = v) } },
                 )
+                Text("向き(回転)", style = MaterialTheme.typography.bodyMedium)
+                ChoiceChips(
+                    options = listOf(
+                        -1 to "自動",
+                        0 to "0°",
+                        1 to "90°",
+                        2 to "180°",
+                        3 to "270°",
+                    ),
+                    selected = settings.cameraRotationOverride,
+                    onSelect = { v -> update { it.copy(cameraRotationOverride = v) } },
+                )
+                ToggleRow(
+                    label = "ミラーを反転",
+                    description = "自動の左右反転を入れ替えます(映像の向きがおかしい場合)",
+                    checked = settings.cameraMirrorInverted,
+                    onCheckedChange = { v -> update { it.copy(cameraMirrorInverted = v) } },
+                )
             }
 
             SectionCard(title = "トラッキング") {

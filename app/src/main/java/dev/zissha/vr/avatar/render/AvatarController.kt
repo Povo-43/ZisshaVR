@@ -50,10 +50,15 @@ class AvatarController(val renderer: AvatarRenderer) {
         rigger = null
         spring = null
         if (vrm != null && renderer.loaded) {
-            rig = HumanoidRig(doc, vrm)
-            rigger = PoseRigger(doc, vrm)
-            spring = SpringBoneSim(rig!!, doc, vrm.springBoneGroups)
-            rigger!!.humanoidRig.evaluate()
+            // PoseRigger owns the rig it poses. The renderer must skin from that exact instance:
+            // creating a second HumanoidRig here left the renderer reading an unposed rig, so the
+            // avatar stayed in its rest (T) pose and never followed tracking.
+            val rg = PoseRigger(doc, vrm)
+            val r = rg.humanoidRig
+            rigger = rg
+            rig = r
+            spring = SpringBoneSim(r, doc, vrm.springBoneGroups)
+            r.evaluate()
             Log.i(
                 TAG,
                 "rig ready: bones=${vrm.humanoidBones.size} expressions=${vrm.expressions.size} " +

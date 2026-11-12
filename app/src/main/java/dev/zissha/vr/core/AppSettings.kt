@@ -15,6 +15,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 data class Settings(
     val cameraLensFront: Boolean = true,
+    /** -1 = auto (device sensor orientation), 0..3 = forced quarter-turn rotation. */
+    val cameraRotationOverride: Int = -1,
+    /** Invert the automatic front-camera mirror (device-specific display fix). */
+    val cameraMirrorInverted: Boolean = false,
     val resolutionIndex: Int = 1, // 0=720p, 1=1080p
     val targetFps: Int = 30,
     val poseEnabled: Boolean = true,
@@ -41,6 +45,8 @@ class SettingsRepository(private val context: Context) {
 
     private object Keys {
         val cameraLensFront = booleanPreferencesKey("camera_front")
+        val cameraRotationOverride = intPreferencesKey("camera_rotation_override")
+        val cameraMirrorInverted = booleanPreferencesKey("camera_mirror_inverted")
         val resolutionIndex = intPreferencesKey("resolution_index")
         val targetFps = intPreferencesKey("target_fps")
         val poseEnabled = booleanPreferencesKey("pose_enabled")
@@ -62,6 +68,8 @@ class SettingsRepository(private val context: Context) {
     val settings: Flow<Settings> = context.dataStore.data.map { p ->
         Settings(
             cameraLensFront = p[Keys.cameraLensFront] ?: true,
+            cameraRotationOverride = p[Keys.cameraRotationOverride] ?: -1,
+            cameraMirrorInverted = p[Keys.cameraMirrorInverted] ?: false,
             resolutionIndex = p[Keys.resolutionIndex] ?: 1,
             targetFps = p[Keys.targetFps] ?: 30,
             poseEnabled = p[Keys.poseEnabled] ?: true,
@@ -85,6 +93,8 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { p ->
             val current = Settings(
                 cameraLensFront = p[Keys.cameraLensFront] ?: true,
+                cameraRotationOverride = p[Keys.cameraRotationOverride] ?: -1,
+                cameraMirrorInverted = p[Keys.cameraMirrorInverted] ?: false,
                 resolutionIndex = p[Keys.resolutionIndex] ?: 1,
                 targetFps = p[Keys.targetFps] ?: 30,
                 poseEnabled = p[Keys.poseEnabled] ?: true,
@@ -104,6 +114,8 @@ class SettingsRepository(private val context: Context) {
             )
             val next = transform(current)
             p[Keys.cameraLensFront] = next.cameraLensFront
+            p[Keys.cameraRotationOverride] = next.cameraRotationOverride
+            p[Keys.cameraMirrorInverted] = next.cameraMirrorInverted
             p[Keys.resolutionIndex] = next.resolutionIndex
             p[Keys.targetFps] = next.targetFps
             p[Keys.poseEnabled] = next.poseEnabled
