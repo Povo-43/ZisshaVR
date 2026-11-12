@@ -12,10 +12,11 @@ Android単体で動作する、実写背景合成型リアルタイムアバタ�
 | `:app` | メインアプリ(カメラ → トラッキング → GL合成 → 録画/配信) |
 | `:remote` | BLEリモコンアプリ(BLE Central) |
 | `:protocol` | BLE通信プロトコル(純Kotlin、単体テストあり) |
+| `:ui` | 共通デザインシステム(Material 3テーマ・共通UIコンポーネント。`:app`と`:remote`で共有) |
 
 ## 技術スタック
 
-- Kotlin / Jetpack Compose / Coroutines
+- Kotlin / Jetpack Compose (Material 3、共通`:ui`デザインシステム、システムのライト/ダーク追従) / Coroutines
 - CameraX(Preview → 自前GLスレッドへSurfaceTexture供給)
 - MediaPipe Tasks Vision 0.10.14(GPU delegate: Pose / Face / Hand / Selfie Segmentation)
 - OpenGL ES 3.0(FBOマルチパス合成、テクスチャスキニング、GPUセグメンテーションマスク処理)

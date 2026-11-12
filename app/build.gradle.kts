@@ -15,8 +15,8 @@ android {
         applicationId = "dev.zissha.vr"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.2"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -78,9 +78,11 @@ android {
 
 dependencies {
     implementation(project(":protocol"))
+    implementation(project(":ui"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))

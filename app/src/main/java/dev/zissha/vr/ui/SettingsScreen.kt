@@ -1,6 +1,8 @@
 package dev.zissha.vr.ui
 
-import android.net.Uri
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -13,49 +15,72 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.zissha.ui.components.ChoiceChips
+import dev.zissha.ui.components.InfoRow
+import dev.zissha.ui.components.SectionCard
+import dev.zissha.ui.components.ToggleRow
 import dev.zissha.vr.BuildConfig
 import dev.zissha.vr.core.Engine
+import dev.zissha.vr.core.Settings
 import kotlinx.coroutines.launch
 
 /**
- * Settings screen (spec 12): camera, resolution, FPS, tracking, LOD, avatar management,
- * privacy image, recording, RTMP, Bluetooth.
+ * Settings screen (spec 12): camera, tracking, avatar management, privacy image,
+ * recording / RTMP and Bluetooth. Grouped into cards so each topic is scannable.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
     val context = LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val settings by engine.settingsFlow().collectAsState(initial = dev.zissha.vr.core.Settings())
-    val ui by engine.uiState.collectAsState()
-    val avatars = remember { mutableStateOf(engine.avatarLoaderInstance.listAvatars()) }
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val settings by engine.settingsFlow().collectAsStateWithLifecycle(initialValue = Settings())
+    val ui by engine.uiState.collectAsStateWithLifecycle()
+    var avatars by remember { mutableStateOf(engine.avatarLoaderInstance.listAvatars()) }
+    var pendingDeleteAvatar by remember { mutableStateOf<String?>(null) }
+    var showStreamKey by remember { mutableStateOf(false) }
 
-    fun update(transform: (dev.zissha.vr.core.Settings) -> dev.zissha.vr.core.Settings) {
+    fun update(transform: (Settings) -> Settings) {
         scope.launch { engine.settingsRepository.update(transform) }
+    }
+
+    fun toast(message: String) {
+        scope.launch { snackbarHostState.showSnackbar(message) }
     }
 
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -63,14 +88,17 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
             scope.launch {
                 val name = engine.avatarLoaderInstance.importFromUri(uri, uri.lastPathSegment)
                 if (name != null) {
                     update { it.copy(avatarUri = name) }
-                    avatars.value = engine.avatarLoaderInstance.listAvatars()
+                    avatars = engine.avatarLoaderInstance.listAvatars()
+                    toast("アバターを取り込みました: $name")
+                } else {
+                    toast("取り込みに失敗しました")
                 }
             }
         }
@@ -81,10 +109,11 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             }
             update { it.copy(privacyImageUri = uri.toString()) }
+            toast("プライバシー画像を設定しました")
         }
     }
 
@@ -94,192 +123,319 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 title = { Text("設定") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
                     }
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            SectionTitle("カメラ")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
+            SectionCard(title = "カメラ") {
+                Text("レンズ", style = MaterialTheme.typography.bodyMedium)
+                ChoiceChips(
+                    options = listOf(true to "フロント", false to "バック"),
                     selected = settings.cameraLensFront,
-                    onClick = { update { it.copy(cameraLensFront = true) } },
-                    label = { Text("フロント") },
+                    onSelect = { v -> update { it.copy(cameraLensFront = v) } },
                 )
-                FilterChip(
-                    selected = !settings.cameraLensFront,
-                    onClick = { update { it.copy(cameraLensFront = false) } },
-                    label = { Text("バック") },
+                Text("解像度", style = MaterialTheme.typography.bodyMedium)
+                ChoiceChips(
+                    options = listOf(0 to "720p", 1 to "1080p"),
+                    selected = settings.resolutionIndex,
+                    onSelect = { v -> update { it.copy(resolutionIndex = v) } },
+                )
+                Text("フレームレート", style = MaterialTheme.typography.bodyMedium)
+                ChoiceChips(
+                    options = listOf(24 to "24fps", 30 to "30fps", 60 to "60fps"),
+                    selected = settings.targetFps,
+                    onSelect = { v -> update { it.copy(targetFps = v) } },
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0 to "720p", 1 to "1080p").forEach { (idx, label) ->
-                    FilterChip(
-                        selected = settings.resolutionIndex == idx,
-                        onClick = { update { it.copy(resolutionIndex = idx) } },
-                        label = { Text(label) },
-                    )
+
+            SectionCard(title = "トラッキング") {
+                ToggleRow(
+                    label = "人物セグメンテーション",
+                    description = "人物領域をアバターで置き換えます",
+                    checked = settings.segmentationEnabled,
+                    onCheckedChange = { v -> update { it.copy(segmentationEnabled = v) } },
+                )
+                Text("LOD(負荷レベル)", style = MaterialTheme.typography.bodyMedium)
+                ChoiceChips(
+                    options = listOf(
+                        0 to "自動",
+                        1 to "L0",
+                        2 to "L1",
+                        3 to "L2",
+                    ),
+                    selected = if (settings.lodAuto) 0 else settings.forcedLod + 1,
+                    onSelect = { v ->
+                        if (v == 0) {
+                            update { it.copy(lodAuto = true) }
+                        } else {
+                            update { it.copy(lodAuto = false, forcedLod = v - 1) }
+                        }
+                    },
+                )
+                InfoRow("現在のLOD", "L${ui.stats.lod}")
+                InfoRow("負荷制御", "L${ui.governorLevel} (${ui.thermalStatusText})")
+            }
+
+            SectionCard(title = "アバター") {
+                Button(
+                    onClick = { avatarPicker.launch(arrayOf("*/*")) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("VRM / glb / gltf を読み込む") }
+                if (ui.avatarLoading) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.padding(2.dp))
+                        Text("読み込み中…", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(24, 30, 60).forEach { fps ->
-                    FilterChip(
-                        selected = settings.targetFps == fps,
-                        onClick = { update { it.copy(targetFps = fps) } },
-                        label = { Text("${fps}fps") },
+                if (avatars.isEmpty()) {
+                    Text(
+                        "アバターが登録されていません。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else {
+                    avatars.forEach { avatar ->
+                        val active = avatar.name == settings.avatarUri || avatar.name == ui.avatarName
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = avatar.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = if (active) "使用中" else "${avatar.sizeBytes / 1024} KB",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (active) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { update { it.copy(avatarUri = avatar.name) } },
+                                enabled = !active,
+                            ) { Text("使用") }
+                            IconButton(onClick = { pendingDeleteAvatar = avatar.name }) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "削除",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    }
+                }
+                AvatarScaleRow(
+                    scale = settings.avatarScale,
+                    onCommit = { v -> update { it.copy(avatarScale = v) } },
+                )
+            }
+
+            SectionCard(title = "プライバシー画像") {
+                Text(
+                    text = "PRIVACYモードで表示・配信される静止画像です。未設定の場合は既定画像を使用します。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = { privacyPicker.launch(arrayOf("image/*")) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("画像を選択") }
+                if (settings.privacyImageUri.isNotEmpty()) {
+                    InfoRow("設定", "カスタム画像")
+                    OutlinedButton(
+                        onClick = {
+                            update { it.copy(privacyImageUri = "") }
+                            toast("既定画像に戻しました")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("既定画像に戻す") }
+                } else {
+                    InfoRow("設定", "既定画像")
                 }
             }
 
-            SectionTitle("トラッキング")
-            ToggleRow("人物セグメンテーション", settings.segmentationEnabled) { v ->
-                update { it.copy(segmentationEnabled = v) }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("LOD", style = MaterialTheme.typography.bodyMedium)
-                FilterChip(
-                    selected = settings.lodAuto,
-                    onClick = { update { it.copy(lodAuto = true) } },
-                    label = { Text("自動") },
+            SectionCard(title = "録画・配信") {
+                ToggleRow(
+                    label = "マイク音声を含める",
+                    checked = settings.audioEnabled,
+                    onCheckedChange = { v -> update { it.copy(audioEnabled = v) } },
                 )
-                listOf(0, 1, 2).forEach { lod ->
-                    FilterChip(
-                        selected = !settings.lodAuto && settings.forcedLod == lod,
-                        onClick = { update { it.copy(lodAuto = false, forcedLod = lod) } },
-                        label = { Text("L$lod") },
-                    )
-                }
+                Text("ビットレート", style = MaterialTheme.typography.bodyMedium)
+                ChoiceChips(
+                    options = listOf(2000, 4000, 6000, 8000).map { it to "${it / 1000}Mbps" },
+                    selected = settings.videoBitrateKbps,
+                    onSelect = { v -> update { it.copy(videoBitrateKbps = v) } },
+                )
+                RtmpFields(
+                    initialUrl = settings.rtmpUrl,
+                    initialKey = settings.streamKey,
+                    showKey = showStreamKey,
+                    onToggleShowKey = { showStreamKey = !showStreamKey },
+                    onSave = { url, key ->
+                        update { it.copy(rtmpUrl = url, streamKey = key) }
+                        toast("RTMP設定を保存しました")
+                    },
+                )
             }
-            Text(
-                "現在のLOD: ${ui.stats.lod} / 負荷制御 L${ui.governorLevel} (${ui.thermalStatusText})",
-                style = MaterialTheme.typography.bodySmall,
-            )
 
-            SectionTitle("アバター")
-            Button(onClick = { avatarPicker.launch(arrayOf("*/*")) }) { Text("VRM / glb を読み込む") }
-            if (ui.avatarLoading) Text("アバターを読み込み中…", style = MaterialTheme.typography.bodySmall)
-            avatars.value.forEach { avatar ->
+            SectionCard(
+                title = "Bluetoothリモコン",
+                subtitle = "別端末の「ZisshaVR Remote」から操作できます。",
+            ) {
+                ToggleRow(
+                    label = "BLEペリフェラルを有効化",
+                    description = if (settings.bleEnabled && ui.bleRunning) "稼働中" else "停止中",
+                    checked = settings.bleEnabled,
+                    onCheckedChange = { v -> update { it.copy(bleEnabled = v) } },
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        avatar.name + if (avatar.name == settings.avatarUri) "  ✓" else "",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedButton(onClick = {
-                        update { it.copy(avatarUri = avatar.name) }
-                    }) { Text("使用") }
-                    OutlinedButton(onClick = {
-                        engine.avatarLoaderInstance.deleteAvatar(avatar.name)
-                        avatars.value = engine.avatarLoaderInstance.listAvatars()
-                    }) { Text("削除") }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("ペアリングコード", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = ui.bleToken.ifEmpty { "(BLE無効)" },
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    if (ui.bleToken.isNotEmpty()) {
+                        IconButton(onClick = {
+                            val clipboard = context.getSystemService(ClipboardManager::class.java)
+                            clipboard?.setPrimaryClip(
+                                ClipData.newPlainText("ZisshaVR pairing code", ui.bleToken),
+                            )
+                            toast("コードをコピーしました")
+                        }) {
+                            Icon(Icons.Filled.ContentCopy, contentDescription = "コピー")
+                        }
+                    }
                 }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("サイズ", style = MaterialTheme.typography.bodyMedium)
-                listOf(0.8f, 1.0f, 1.2f).forEach { s ->
-                    FilterChip(
-                        selected = (settings.avatarScale - s).let { it > -0.05f && it < 0.05f },
-                        onClick = {
-                            update { it.copy(avatarScale = s) }
-                            engine.setAvatarScale(s)
-                        },
-                        label = { Text("x%.1f".format(s)) },
-                    )
-                }
+                InfoRow("接続状態", if (ui.bleConnected) "接続済み" else "待機中")
             }
 
-            SectionTitle("プライバシー画像")
-            Button(onClick = { privacyPicker.launch(arrayOf("image/*")) }) { Text("プライバシー画像を選択") }
-            if (settings.privacyImageUri.isNotEmpty()) {
-                OutlinedButton(onClick = { update { it.copy(privacyImageUri = "") } }) {
-                    Text("デフォルトに戻す")
-                }
-            }
-
-            SectionTitle("録画 / 配信")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("マイク音声", style = MaterialTheme.typography.bodyMedium)
-                Switch(checked = settings.audioEnabled, onCheckedChange = { v ->
-                    update { it.copy(audioEnabled = v) }
-                })
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(2000, 4000, 6000, 8000).forEach { kbps ->
-                    FilterChip(
-                        selected = settings.videoBitrateKbps == kbps,
-                        onClick = { update { it.copy(videoBitrateKbps = kbps) } },
-                        label = { Text("${kbps}kbps") },
-                    )
-                }
-            }
-            var rtmpUrl by remember(settings.rtmpUrl) { mutableStateOf(settings.rtmpUrl) }
-            var streamKey by remember(settings.streamKey) { mutableStateOf(settings.streamKey) }
-            OutlinedTextField(
-                value = rtmpUrl,
-                onValueChange = { rtmpUrl = it },
-                label = { Text("RTMP URL (rtmp://サーバー/live)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = streamKey,
-                onValueChange = { streamKey = it },
-                label = { Text("ストリームキー(分離保存・ログに出力されません)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            Button(onClick = { update { it.copy(rtmpUrl = rtmpUrl.trim(), streamKey = streamKey.trim()) } }) {
-                Text("RTMP設定を保存")
-            }
-
-            SectionTitle("Bluetoothリモコン")
-            ToggleRow("BLEペリフェラルを有効化", settings.bleEnabled) { v ->
-                update { it.copy(bleEnabled = v) }
-                if (v) {
-                    // restart peripheral via engine setting propagation happens on next start()
-                }
-            }
             Text(
-                "ペアリングコード: ${ui.bleToken.ifEmpty { "(BLE無効)" }}",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-
-            HorizontalDivider()
-            Text(
-                "ビルド ${BuildConfig.VERSION_NAME}",
+                text = "ZisshaVR ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 24.dp),
             )
         }
     }
+
+    pendingDeleteAvatar?.let { name ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteAvatar = null },
+            title = { Text("アバターを削除しますか？") },
+            text = { Text("$name\nこの操作は取り消せません。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    engine.avatarLoaderInstance.deleteAvatar(name)
+                    avatars = engine.avatarLoaderInstance.listAvatars()
+                    if (settings.avatarUri == name) {
+                        update { it.copy(avatarUri = "") }
+                    }
+                    pendingDeleteAvatar = null
+                    toast("削除しました")
+                }) {
+                    Text("削除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteAvatar = null }) { Text("キャンセル") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+private fun AvatarScaleRow(scale: Float, onCommit: (Float) -> Unit) {
+    var local by remember(scale) { mutableStateOf(scale) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("サイズ", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "x%.2f".format(local),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = local,
+            onValueChange = { local = it },
+            onValueChangeFinished = { onCommit(local) },
+            valueRange = 0.5f..1.5f,
+        )
+    }
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label)
-        Switch(checked = checked, onCheckedChange = onChange)
+private fun RtmpFields(
+    initialUrl: String,
+    initialKey: String,
+    showKey: Boolean,
+    onToggleShowKey: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var url by remember(initialUrl) { mutableStateOf(initialUrl) }
+    var key by remember(initialKey) { mutableStateOf(initialKey) }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            value = url,
+            onValueChange = { url = it },
+            label = { Text("RTMP URL") },
+            placeholder = { Text("rtmp://サーバー/live") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        OutlinedTextField(
+            value = key,
+            onValueChange = { key = it },
+            label = { Text("ストリームキー") },
+            supportingText = { Text("URLとは分離して保存され、ログには出力されません") },
+            trailingIcon = {
+                IconButton(onClick = onToggleShowKey) {
+                    Icon(
+                        if (showKey) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (showKey) "キーを隠す" else "キーを表示",
+                    )
+                }
+            },
+            visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Button(
+            onClick = { onSave(url.trim(), key.trim()) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("RTMP設定を保存") }
     }
 }

@@ -440,6 +440,20 @@ class Engine private constructor() {
 
     // ------------------------------------------------------------------ public controls
 
+    /** Clears a one-shot error message after the UI has surfaced it (snackbar). */
+    fun clearError() {
+        if (_uiState.value.lastError != null) {
+            _uiState.value = _uiState.value.copy(lastError = null)
+        }
+    }
+
+    /** User-initiated camera retry after a bind failure (previewSizeError). */
+    fun retryCamera() {
+        if (!started) return
+        _uiState.value = _uiState.value.copy(previewSizeError = false)
+        lifecycleScope?.launch(Dispatchers.Main) { restartCamera() }
+    }
+
     fun setMode(mode: OutputMode) {
         gate.requestMode(mode)
         if (mode == OutputMode.PRIVACY) {

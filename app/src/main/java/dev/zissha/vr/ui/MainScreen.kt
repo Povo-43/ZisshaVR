@@ -1,53 +1,85 @@
 package dev.zissha.vr.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.view.SurfaceView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.zissha.protocol.OutputMode
+import dev.zissha.ui.components.StatusPill
+import dev.zissha.ui.theme.ZisshaTheme
 import dev.zissha.vr.core.Engine
+import dev.zissha.vr.core.EngineUiState
+import dev.zissha.vr.stream.StreamState
 
 /**
- * Main screen (spec 12): preview + status + LIVE/FREEZE/PRIVACY + record/stream controls.
- * The preview SurfaceView is handed to the render thread; UI recomposition never blocks the
- * camera / inference / encode pipeline.
+ * Main screen (spec 12): preview, health/stat readout, LIVE/FREEZE/PRIVACY mode switching and
+ * record/stream controls.
+ *
+ * The preview SurfaceView is handed to the render thread; UI recomposition never touches the
+ * camera / inference / encode pipeline (spec 12: 画面と映像処理の分離).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(engine: Engine, onOpenSettings: () -> Unit, onOpenRecordings: () -> Unit) {
-    val ui by engine.uiState.collectAsState()
+    val ui by engine.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Surface engine errors once, then clear so they do not repeat on recomposition.
+    LaunchedEffect(ui.lastError) {
+        val message = ui.lastError
+        if (!message.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(message)
+            engine.clearError()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -55,190 +87,383 @@ fun MainScreen(engine: Engine, onOpenSettings: () -> Unit, onOpenRecordings: () 
                 title = { Text("ZisshaVR") },
                 actions = {
                     IconButton(onClick = onOpenRecordings) {
-                        Icon(Icons.Filled.Videocam, contentDescription = "recordings")
+                        Icon(Icons.Filled.Videocam, contentDescription = "録画一覧")
                     }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "settings")
+                        Icon(Icons.Filled.Settings, contentDescription = "設定")
                     }
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            Box(
+            PreviewPane(
+                engine = engine,
+                ui = ui,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .background(Color.Black),
-            ) {
-                AndroidView(
-                    factory = { context ->
-                        SurfaceView(context).also { sv ->
-                            sv.holder.addCallback(object : android.view.SurfaceHolder.Callback {
-                                override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                                    engine.setPreviewSurface(holder.surface)
-                                }
-
-                                override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
-                                    engine.setPreviewSurface(holder.surface)
-                                }
-
-                                override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
-                                    engine.setPreviewSurface(null)
-                                }
-                            })
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-
-                // status overlay
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    StatusChip(
-                        text = "モード: ${modeLabel(ui.mode)}" + (ui.gateTrigger?.let { " (${triggerLabel(it)})" } ?: ""),
-                        color = when (ui.mode) {
-                            OutputMode.LIVE -> Color(0xFF1E88E5)
-                            OutputMode.FREEZE -> Color(0xFFFFA000)
-                            OutputMode.PRIVACY -> Color(0xFF8E24AA)
-                        },
-                    )
-                    StatusChip(
-                        text = if (ui.trackingHealthy) "トラッキング: 正常" else "トラッキング: 検出なし",
-                        color = if (ui.trackingHealthy) Color(0xFF2E7D32) else Color(0xFFC62828),
-                    )
-                    StatusChip(text = "LOD: ${ui.stats.lod}", color = Color(0xFF37474F))
-                    StatusChip(
-                        text = "FPS: %.1f  推論: %.1fms".format(ui.stats.fps, ui.stats.poseMs + ui.stats.faceMs + ui.stats.handMs + ui.stats.segmentMs),
-                        color = Color(0xFF37474F),
-                    )
-                    StatusChip(
-                        text = "温度状態: ${ui.thermalStatusText} (L${ui.governorLevel})",
-                        color = if (ui.governorLevel >= 3) Color(0xFFC62828) else Color(0xFF37474F),
-                    )
-                    StatusChip(
-                        text = if (ui.recording) "録画中 ●" else "録画",
-                        color = if (ui.recording) Color(0xFFC62828) else Color(0xFF37474F),
-                    )
-                    StatusChip(
-                        text = "配信: ${streamStateLabel(ui.streamState)}",
-                        color = if (ui.streamState == dev.zissha.vr.stream.StreamState.STREAMING) Color(0xFF2E7D32) else Color(0xFF37474F),
-                    )
-                    if (ui.avatarName.isNotEmpty()) {
-                        StatusChip(text = "アバター: ${ui.avatarName}", color = Color(0xFF37474F))
-                    }
-                    if (ui.mode != OutputMode.LIVE) {
-                        StatusChip(
-                            text = if (ui.canRecover) "LIVEボタンで復帰できます" else "トラッキング確認中…",
-                            color = Color(0xFF6D4C41),
-                        )
-                    }
-                }
+                    .weight(1f),
+            )
+            StatsRow(ui)
+            ModeControls(engine, ui)
+            OutputControls(engine, ui)
+            if (ui.avatarName.isEmpty() && !ui.avatarLoading) {
+                AvatarHint(onOpenSettings)
             }
-
-            // mode buttons (spec 7.4: large buttons, synchronous switching)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = { engine.setMode(OutputMode.LIVE) },
-                    enabled = ui.mode == OutputMode.LIVE || ui.canRecover,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
-                    modifier = Modifier.weight(1f).height(56.dp),
-                ) { Text("通常配信") }
-                Button(
-                    onClick = { engine.setMode(OutputMode.FREEZE) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA000)),
-                    modifier = Modifier.weight(1f).height(56.dp),
-                ) { Text("映像停止") }
-                Button(
-                    onClick = { engine.setMode(OutputMode.PRIVACY) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E24AA)),
-                    modifier = Modifier.weight(1f).height(56.dp),
-                ) { Text("プライバシー") }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = { if (ui.recording) engine.stopRecording() else engine.startRecording() },
-                    modifier = Modifier.weight(1f),
-                ) { Text(if (ui.recording) "録画停止" else "録画開始") }
-                Button(
-                    onClick = { if (ui.streamState == dev.zissha.vr.stream.StreamState.STREAMING) engine.stopStreaming() else engine.startStreaming() },
-                    modifier = Modifier.weight(1f),
-                ) { Text(if (ui.streamState == dev.zissha.vr.stream.StreamState.STREAMING) "配信停止" else "配信開始") }
-            }
-
             if (ui.bleRunning) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        "BLEリモコン: ${if (ui.bleConnected) "接続済み" else "待機中"}  認証コード: ${ui.bleToken}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
+                BleCard(ui)
             }
         }
     }
 }
 
-fun modeLabel(mode: OutputMode): String = when (mode) {
-    OutputMode.LIVE -> "通常(LIVE)"
-    OutputMode.FREEZE -> "停止(FREEZE)"
-    OutputMode.PRIVACY -> "プライバシー"
-}
+/** Preview surface + non-blocking status overlay (kept minimal so it never hides the frame). */
+@Composable
+private fun PreviewPane(engine: Engine, ui: EngineUiState, modifier: Modifier = Modifier) {
+    val sem = ZisshaTheme.semantic
+    Box(
+        modifier = modifier.background(Color.Black),
+    ) {
+        AndroidView(
+            factory = { context ->
+                SurfaceView(context).also { sv ->
+                    sv.holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                            engine.setPreviewSurface(holder.surface)
+                        }
 
-fun streamStateLabel(state: dev.zissha.vr.stream.StreamState): String = when (state) {
-    dev.zissha.vr.stream.StreamState.IDLE -> "未接続"
-    dev.zissha.vr.stream.StreamState.CONNECTING -> "接続中"
-    dev.zissha.vr.stream.StreamState.STREAMING -> "配信中"
-    dev.zissha.vr.stream.StreamState.RECONNECTING -> "再接続中"
-    dev.zissha.vr.stream.StreamState.FAILED -> "失敗"
-    dev.zissha.vr.stream.StreamState.DISCONNECTED -> "切断"
-}
+                        override fun surfaceChanged(
+                            holder: android.view.SurfaceHolder,
+                            format: Int,
+                            width: Int,
+                            height: Int,
+                        ) {
+                            engine.setPreviewSurface(holder.surface)
+                        }
 
-fun triggerLabel(reason: String): String = when {
-    reason.startsWith("internal_error") -> "内部エラー"
-    else -> when (reason) {
-        "pose_timeout" -> "トラッキング中断"
-        "landmark_warp" -> "ランドマーク異常"
-        "low_confidence" -> "信頼度低下"
-        "camera_stall" -> "カメラ停止"
-        "inference_timeout" -> "推論タイムアウト"
-        "segmentation_anomaly" -> "セグメンテーション異常"
-        else -> reason
+                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                            engine.setPreviewSurface(null)
+                        }
+                    })
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Top-left: current output state.
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            val (modeColor, modeInk) = when (ui.mode) {
+                OutputMode.LIVE -> sem.live to sem.onLive
+                OutputMode.FREEZE -> sem.freeze to sem.onFreeze
+                OutputMode.PRIVACY -> sem.privacy to sem.onPrivacy
+            }
+            StatusPill(
+                text = buildString {
+                    append(modeShortLabel(ui.mode))
+                    ui.gateTrigger?.let { append(" · ${triggerLabel(it)}") }
+                },
+                color = modeColor,
+                contentColor = modeInk,
+                dot = true,
+            )
+            StatusPill(
+                text = if (ui.trackingHealthy) "トラッキング 正常" else "トラッキング 検出なし",
+                color = if (ui.trackingHealthy) sem.ok else sem.danger,
+                dot = true,
+            )
+        }
+
+        // Top-right: active output + thermal warning.
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(10.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (ui.recording) {
+                StatusPill(text = "REC", color = sem.danger, dot = true)
+            }
+            if (ui.streamState == StreamState.STREAMING) {
+                StatusPill(text = "配信中", color = sem.ok, dot = true)
+            }
+            if (ui.governorLevel >= 3) {
+                StatusPill(text = "温度注意 L${ui.governorLevel}", color = sem.warning, contentColor = sem.onFill)
+            }
+        }
+
+        // Bottom-left: recovery hint while not live.
+        if (ui.mode != OutputMode.LIVE) {
+            StatusPill(
+                text = if (ui.canRecover) "「通常配信」で復帰できます" else "トラッキング確認中…",
+                color = Color(0xCC3E2723),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(10.dp),
+            )
+        }
+
+        // Camera failure overlay with a retry action.
+        if (ui.previewSizeError) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Text(
+                        text = "カメラを開始できませんでした",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        text = "権限とカメラの使用状況を確認して再試行してください。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center,
+                    )
+                    Button(onClick = { engine.retryCamera() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("再試行", modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        }
     }
 }
 
-/** Access bridge kept minimal: status chips. */
+/** Compact, wrapping readout of performance + output state below the preview. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun StatusChip(text: String, color: Color) {
-    Box(
+private fun StatsRow(ui: EngineUiState) {
+    val sem = ZisshaTheme.semantic
+    val neutral = MaterialTheme.colorScheme.surfaceVariant
+    val neutralInk = MaterialTheme.colorScheme.onSurfaceVariant
+    FlowRow(
         modifier = Modifier
-            .background(color.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(text, color = Color.White, style = MaterialTheme.typography.labelSmall)
+        StatusPill("LOD ${ui.stats.lod}", neutral, contentColor = neutralInk)
+        StatusPill("FPS %.0f".format(ui.stats.fps), neutral, contentColor = neutralInk)
+        StatusPill(
+            "推論 %.0fms".format(ui.stats.poseMs + ui.stats.faceMs + ui.stats.handMs + ui.stats.segmentMs),
+            neutral,
+            contentColor = neutralInk,
+        )
+        StatusPill(
+            "温度 ${ui.thermalStatusText} (L${ui.governorLevel})",
+            if (ui.governorLevel >= 3) sem.warning else neutral,
+            contentColor = if (ui.governorLevel >= 3) sem.onFill else neutralInk,
+        )
+        StatusPill(
+            if (ui.recording) "録画中" else "録画停止",
+            if (ui.recording) sem.danger else neutral,
+            contentColor = if (ui.recording) Color.White else neutralInk,
+        )
+        StatusPill(
+            "配信 ${streamStateLabel(ui.streamState)}",
+            if (ui.streamState == StreamState.STREAMING) sem.ok else neutral,
+            contentColor = if (ui.streamState == StreamState.STREAMING) Color.White else neutralInk,
+        )
+        if (ui.avatarName.isNotEmpty()) {
+            StatusPill("アバター ${ui.avatarName}", neutral, contentColor = neutralInk)
+        }
+    }
+}
+
+/** Large, synchronous mode buttons (spec 7.4). PRIVACY is always available. */
+@Composable
+private fun ModeControls(engine: Engine, ui: EngineUiState) {
+    val sem = ZisshaTheme.semantic
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(
+            onClick = { engine.setMode(OutputMode.LIVE) },
+            enabled = ui.mode == OutputMode.LIVE || ui.canRecover,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = sem.live,
+                contentColor = sem.onLive,
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .height(64.dp),
+        ) {
+            Text("通常配信", fontWeight = FontWeight.Bold)
+        }
+        Button(
+            onClick = { engine.setMode(OutputMode.FREEZE) },
+            enabled = ui.mode != OutputMode.FREEZE,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = sem.freeze,
+                contentColor = sem.onFreeze,
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .height(64.dp),
+        ) {
+            Text("映像停止", fontWeight = FontWeight.Bold)
+        }
+        Button(
+            onClick = { engine.setMode(OutputMode.PRIVACY) },
+            enabled = ui.mode != OutputMode.PRIVACY,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = sem.privacy,
+                contentColor = sem.onPrivacy,
+            ),
+            modifier = Modifier
+                .weight(1.15f)
+                .height(64.dp),
+        ) {
+            Text("プライバシー", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** Recording / streaming toggles with explicit state colours. */
+@Composable
+private fun OutputControls(engine: Engine, ui: EngineUiState) {
+    val sem = ZisshaTheme.semantic
+    val idleContainer = MaterialTheme.colorScheme.secondaryContainer
+    val idleInk = MaterialTheme.colorScheme.onSecondaryContainer
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(
+            onClick = { if (ui.recording) engine.stopRecording() else engine.startRecording() },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (ui.recording) sem.danger else idleContainer,
+                contentColor = if (ui.recording) Color.White else idleInk,
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .height(56.dp),
+        ) {
+            Icon(
+                if (ui.recording) Icons.Filled.Stop else Icons.Filled.FiberManualRecord,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                if (ui.recording) "録画停止" else "録画開始",
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        val streaming = ui.streamState == StreamState.STREAMING ||
+            ui.streamState == StreamState.CONNECTING ||
+            ui.streamState == StreamState.RECONNECTING
+        Button(
+            onClick = { if (streaming) engine.stopStreaming() else engine.startStreaming() },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (streaming) sem.ok else idleContainer,
+                contentColor = if (streaming) Color.White else idleInk,
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .height(56.dp),
+        ) {
+            Icon(
+                if (streaming) Icons.Filled.Stop else Icons.Filled.Cast,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                if (streaming) "配信停止" else "配信開始",
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AvatarHint(onOpenSettings: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Filled.PersonAdd, contentDescription = null)
+            Text(
+                text = "アバターが未設定です",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onOpenSettings) { Text("設定を開く") }
+        }
+    }
+}
+
+@Composable
+private fun BleCard(ui: EngineUiState) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (ui.bleConnected) "BLEリモコン 接続済み" else "BLEリモコン 待機中",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "認証コード ${ui.bleToken.ifEmpty { "----" }}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (ui.bleToken.isNotEmpty()) {
+                IconButton(onClick = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("ZisshaVR pairing code", ui.bleToken))
+                }) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = "認証コードをコピー")
+                }
+            }
+        }
     }
 }

@@ -23,5 +23,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "ZisshaVR"
 include(":protocol")
+include(":ui")
 include(":app")
 include(":remote")
