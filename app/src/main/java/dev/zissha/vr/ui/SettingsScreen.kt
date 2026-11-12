@@ -91,7 +91,7 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text("設定") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "back")
@@ -108,17 +108,17 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SectionTitle("Camera")
+            SectionTitle("カメラ")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = settings.cameraLensFront,
                     onClick = { update { it.copy(cameraLensFront = true) } },
-                    label = { Text("Front") },
+                    label = { Text("フロント") },
                 )
                 FilterChip(
                     selected = !settings.cameraLensFront,
                     onClick = { update { it.copy(cameraLensFront = false) } },
-                    label = { Text("Back") },
+                    label = { Text("バック") },
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -140,8 +140,8 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 }
             }
 
-            SectionTitle("Tracking")
-            ToggleRow("Person segmentation", settings.segmentationEnabled) { v ->
+            SectionTitle("トラッキング")
+            ToggleRow("人物セグメンテーション", settings.segmentationEnabled) { v ->
                 update { it.copy(segmentationEnabled = v) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -149,7 +149,7 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 FilterChip(
                     selected = settings.lodAuto,
                     onClick = { update { it.copy(lodAuto = true) } },
-                    label = { Text("Auto") },
+                    label = { Text("自動") },
                 )
                 listOf(0, 1, 2).forEach { lod ->
                     FilterChip(
@@ -160,13 +160,13 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 }
             }
             Text(
-                "Current LOD: ${ui.stats.lod} / governor L${ui.governorLevel} (${ui.thermalStatusText})",
+                "現在のLOD: ${ui.stats.lod} / 負荷制御 L${ui.governorLevel} (${ui.thermalStatusText})",
                 style = MaterialTheme.typography.bodySmall,
             )
 
-            SectionTitle("Avatar")
-            Button(onClick = { avatarPicker.launch(arrayOf("*/*")) }) { Text("Import VRM / glb") }
-            if (ui.avatarLoading) Text("loading avatar...", style = MaterialTheme.typography.bodySmall)
+            SectionTitle("アバター")
+            Button(onClick = { avatarPicker.launch(arrayOf("*/*")) }) { Text("VRM / glb を読み込む") }
+            if (ui.avatarLoading) Text("アバターを読み込み中…", style = MaterialTheme.typography.bodySmall)
             avatars.value.forEach { avatar ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -180,15 +180,15 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                     )
                     OutlinedButton(onClick = {
                         update { it.copy(avatarUri = avatar.name) }
-                    }) { Text("Use") }
+                    }) { Text("使用") }
                     OutlinedButton(onClick = {
                         engine.avatarLoaderInstance.deleteAvatar(avatar.name)
                         avatars.value = engine.avatarLoaderInstance.listAvatars()
-                    }) { Text("Del") }
+                    }) { Text("削除") }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Scale", style = MaterialTheme.typography.bodyMedium)
+                Text("サイズ", style = MaterialTheme.typography.bodyMedium)
                 listOf(0.8f, 1.0f, 1.2f).forEach { s ->
                     FilterChip(
                         selected = (settings.avatarScale - s).let { it > -0.05f && it < 0.05f },
@@ -201,17 +201,17 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                 }
             }
 
-            SectionTitle("Privacy image")
-            Button(onClick = { privacyPicker.launch(arrayOf("image/*")) }) { Text("Choose PRIVACY image") }
+            SectionTitle("プライバシー画像")
+            Button(onClick = { privacyPicker.launch(arrayOf("image/*")) }) { Text("プライバシー画像を選択") }
             if (settings.privacyImageUri.isNotEmpty()) {
                 OutlinedButton(onClick = { update { it.copy(privacyImageUri = "") } }) {
-                    Text("Reset to default")
+                    Text("デフォルトに戻す")
                 }
             }
 
-            SectionTitle("Recording / Streaming")
+            SectionTitle("録画 / 配信")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Audio", style = MaterialTheme.typography.bodyMedium)
+                Text("マイク音声", style = MaterialTheme.typography.bodyMedium)
                 Switch(checked = settings.audioEnabled, onCheckedChange = { v ->
                     update { it.copy(audioEnabled = v) }
                 })
@@ -221,7 +221,7 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
                     FilterChip(
                         selected = settings.videoBitrateKbps == kbps,
                         onClick = { update { it.copy(videoBitrateKbps = kbps) } },
-                        label = { Text("${kbps}k") },
+                        label = { Text("${kbps}kbps") },
                     )
                 }
             }
@@ -230,36 +230,36 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
             OutlinedTextField(
                 value = rtmpUrl,
                 onValueChange = { rtmpUrl = it },
-                label = { Text("RTMP URL (rtmp://server/live)") },
+                label = { Text("RTMP URL (rtmp://サーバー/live)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
             OutlinedTextField(
                 value = streamKey,
                 onValueChange = { streamKey = it },
-                label = { Text("Stream key (stored separately, never logged)") },
+                label = { Text("ストリームキー(分離保存・ログに出力されません)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
             Button(onClick = { update { it.copy(rtmpUrl = rtmpUrl.trim(), streamKey = streamKey.trim()) } }) {
-                Text("Save RTMP settings")
+                Text("RTMP設定を保存")
             }
 
-            SectionTitle("Bluetooth remote")
-            ToggleRow("BLE peripheral enabled", settings.bleEnabled) { v ->
+            SectionTitle("Bluetoothリモコン")
+            ToggleRow("BLEペリフェラルを有効化", settings.bleEnabled) { v ->
                 update { it.copy(bleEnabled = v) }
                 if (v) {
                     // restart peripheral via engine setting propagation happens on next start()
                 }
             }
             Text(
-                "Pairing token: ${ui.bleToken.ifEmpty { "(BLE inactive)" }}",
+                "ペアリングコード: ${ui.bleToken.ifEmpty { "(BLE無効)" }}",
                 style = MaterialTheme.typography.bodyMedium,
             )
 
             HorizontalDivider()
             Text(
-                "Build ${BuildConfig.VERSION_NAME}",
+                "ビルド ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(bottom = 24.dp),
             )

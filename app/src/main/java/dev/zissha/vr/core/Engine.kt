@@ -428,13 +428,13 @@ class Engine private constructor() {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#7C4DFF")
             textAlign = Paint.Align.CENTER
-            textSize = 120f
+            textSize = 110f
             isFakeBoldText = true
         }
-        canvas.drawText("PRIVACY", 540f, 900f, paint)
-        paint.textSize = 48f
+        canvas.drawText("プライバシー", 540f, 900f, paint)
+        paint.textSize = 44f
         paint.color = Color.parseColor("#8A93A5")
-        canvas.drawText("ZisshaVR privacy mode", 540f, 1000f, paint)
+        canvas.drawText("ZisshaVR プライバシーモード / カメラ映像は非表示", 540f, 1000f, paint)
         return bmp
     }
 

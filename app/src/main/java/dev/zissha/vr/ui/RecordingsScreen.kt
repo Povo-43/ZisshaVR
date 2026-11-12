@@ -42,7 +42,7 @@ fun RecordingsScreen(engine: Engine, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Recordings") },
+                title = { Text("録画一覧") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "back")
@@ -60,7 +60,7 @@ fun RecordingsScreen(engine: Engine, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (recordings.isEmpty()) {
-                Text("No recordings yet.", style = MaterialTheme.typography.bodyMedium)
+                Text("録画はまだありません。", style = MaterialTheme.typography.bodyMedium)
             }
             recordings.forEach { rec ->
                 Column {
@@ -76,11 +76,11 @@ fun RecordingsScreen(engine: Engine, onBack: () -> Unit) {
                                 putExtra(Intent.EXTRA_STREAM, fileUri(context, rec.file))
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
-                            context.startActivity(Intent.createChooser(share, "Share recording"))
-                        }) { Text("Share") }
+                            context.startActivity(Intent.createChooser(share, "録画を共有"))
+                        }) { Text("共有") }
                         OutlinedButton(onClick = {
                             engine.deleteRecording(rec.file)
-                        }) { Text("Delete") }
+                        }) { Text("削除") }
                     }
                     HorizontalDivider()
                 }

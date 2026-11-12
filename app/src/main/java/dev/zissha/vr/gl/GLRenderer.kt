@@ -54,7 +54,10 @@ class GLRenderer(
     private var encoderSurface: Surface? = null
 
     private var compositor: Compositor? = null
-    private val compositorRef = AtomicReference<Compositor?>()
+    private val compositorRef = AtomicReference<Compositor?>(null)
+
+    /** Bitmaps queued before the GL thread finished initialization. */
+    private var pendingPrivacyBitmap: android.graphics.Bitmap? = null
 
     /** rotation quarter-turns + mirror configured by the camera controller */
     @Volatile var rotationQuarterTurns: Int = 1
@@ -150,7 +153,15 @@ class GLRenderer(
     }
 
     fun setPrivacyImage(bitmap: android.graphics.Bitmap?) {
-        handler.post { compositor?.setPrivacyImage(bitmap) }
+        handler.post {
+            val c = compositor
+            if (c == null) {
+                // GL thread not initialized yet: keep it and apply after initializeGl
+                pendingPrivacyBitmap = bitmap
+            } else {
+                c.setPrivacyImage(bitmap)
+            }
+        }
     }
 
     /** Avatar scale adjustment from settings (spec 12 スケール調整). */
@@ -188,6 +199,10 @@ class GLRenderer(
         compositor = Compositor(avatarController)
         compositor!!.initialize()
         compositorRef.set(compositor)
+        pendingPrivacyBitmap?.let {
+            compositor!!.setPrivacyImage(it)
+            pendingPrivacyBitmap = null
+        }
 
         onCameraSurfaceCreated?.invoke(st)
     }

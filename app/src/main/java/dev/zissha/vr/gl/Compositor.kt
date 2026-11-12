@@ -154,15 +154,14 @@ class Compositor(private val avatarController: AvatarController) {
     ): ByteBuffer? {
         if (compositeFbo == null) return null
 
-        // ---- pass 1: tracking input ------------------------------------------------
+        // ---- pass 1: tracking input (runs in every mode so recovery detection keeps working;
+        //      the readback is internal processing, never output - spec 7.1) ----
         var readback: ByteBuffer? = null
-        if (gateMode != OutputMode.PRIVACY) {
-            trackFbo!!.bind()
-            GLES30.glClearColor(0f, 0f, 0f, 1f)
-            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-            drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram)
-            readback = readTrackFbo()
-        }
+        trackFbo!!.bind()
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram)
+        readback = readTrackFbo()
 
         // ---- pass 2: mask ------------------------------------------------------------
         if (segmentationEnabled && gateMode == OutputMode.LIVE) {

@@ -100,37 +100,37 @@ fun RemoteScreen(central: BleCentral, onScan: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("ZisshaVR Remote", style = MaterialTheme.typography.titleLarge)
+        Text("ZisshaVR リモコン", style = MaterialTheme.typography.titleLarge)
         Text(
             when (state) {
-                BleCentral.ConnectionState.IDLE -> "Not connected"
-                BleCentral.ConnectionState.SCANNING -> "Scanning..."
-                BleCentral.ConnectionState.CONNECTING -> "Connecting..."
-                BleCentral.ConnectionState.CONNECTED -> "Connected (not authorized)"
-                BleCentral.ConnectionState.AUTHORIZED -> "Authorized"
-                BleCentral.ConnectionState.FAILED -> "Failed - check Bluetooth/permissions"
+                BleCentral.ConnectionState.IDLE -> "未接続"
+                BleCentral.ConnectionState.SCANNING -> "検索中…"
+                BleCentral.ConnectionState.CONNECTING -> "接続中…"
+                BleCentral.ConnectionState.CONNECTED -> "接続済み(未認証)"
+                BleCentral.ConnectionState.AUTHORIZED -> "認証済み"
+                BleCentral.ConnectionState.FAILED -> "失敗 - Bluetooth/権限を確認してください"
             },
             style = MaterialTheme.typography.bodyMedium,
         )
 
         if (state == BleCentral.ConnectionState.IDLE || state == BleCentral.ConnectionState.FAILED) {
-            Button(onClick = onScan) { Text("Scan for ZisshaVR") }
+            Button(onClick = onScan) { Text("ZisshaVRを検索") }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Pairing token (shown on the main device)", style = MaterialTheme.typography.labelMedium)
+                Text("ペアリングコード(メイン端末に表示)", style = MaterialTheme.typography.labelMedium)
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it.filter { c -> c.isDigit() }.take(6) },
-                    label = { Text("6-digit token") },
+                    label = { Text("6桁のコード") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
                     onClick = { central.token = token },
                     enabled = token.length == 6 && state == BleCentral.ConnectionState.CONNECTED,
-                ) { Text("Authorize") }
+                ) { Text("認証する") }
             }
         }
 
@@ -141,20 +141,20 @@ fun RemoteScreen(central: BleCentral, onScan: () -> Unit) {
                 enabled = state == BleCentral.ConnectionState.AUTHORIZED,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
                 modifier = Modifier.weight(1f).height(64.dp),
-            ) { Text("LIVE") }
+            ) { Text("通常配信") }
             Button(
                 onClick = { central.setMode(OutputMode.FREEZE) },
                 enabled = state == BleCentral.ConnectionState.AUTHORIZED,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA000)),
                 modifier = Modifier.weight(1f).height(64.dp),
-            ) { Text("FREEZE") }
+            ) { Text("映像停止") }
         }
         Button(
             onClick = { central.setMode(OutputMode.PRIVACY) },
             enabled = state == BleCentral.ConnectionState.AUTHORIZED,
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E24AA)),
             modifier = Modifier.fillMaxWidth().height(80.dp),
-        ) { Text("PRIVACY", style = MaterialTheme.typography.titleLarge) }
+        ) { Text("プライバシー", style = MaterialTheme.typography.titleLarge) }
 
         Spacer(Modifier.height(4.dp))
 
@@ -164,34 +164,34 @@ fun RemoteScreen(central: BleCentral, onScan: () -> Unit) {
                 onClick = { if (recording) central.recordStop() else central.recordStart() },
                 enabled = state == BleCentral.ConnectionState.AUTHORIZED,
                 modifier = Modifier.weight(1f),
-            ) { Text(if (recording) "REC STOP" else "REC START") }
+            ) { Text(if (recording) "録画停止" else "録画開始") }
             val streaming = status?.streaming == true
             Button(
                 onClick = { if (streaming) central.streamStop() else central.streamStart() },
                 enabled = state == BleCentral.ConnectionState.AUTHORIZED,
                 modifier = Modifier.weight(1f),
-            ) { Text(if (streaming) "STREAM STOP" else "STREAM START") }
+            ) { Text(if (streaming) "配信停止" else "配信開始") }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Status", style = MaterialTheme.typography.labelMedium)
+                Text("状態", style = MaterialTheme.typography.labelMedium)
                 val s = status
                 if (s == null) {
-                    Text("(no status received)", style = MaterialTheme.typography.bodySmall)
+                    Text("(状態を受信していません)", style = MaterialTheme.typography.bodySmall)
                 } else {
-                    Text("Mode: ${s.mode}", style = MaterialTheme.typography.bodySmall)
-                    Text("Recording: ${s.recording} / Streaming: ${s.streaming}", style = MaterialTheme.typography.bodySmall)
-                    Text("Tracking: ${if (s.trackingHealthy) "OK" else "LOST"} / LOD ${s.lod}", style = MaterialTheme.typography.bodySmall)
-                    Text("FPS: %.1f  infer: %.1fms".format(s.fps, s.inferenceMs), style = MaterialTheme.typography.bodySmall)
-                    Text("RTMP: ${s.rtmpState} @ ${s.bitrate / 1000}kbps", style = MaterialTheme.typography.bodySmall)
-                    Text("Avatar: ${s.avatarName}", style = MaterialTheme.typography.bodySmall)
+                    Text("モード: ${s.mode}", style = MaterialTheme.typography.bodySmall)
+                    Text("録画: ${s.recording} / 配信: ${s.streaming}", style = MaterialTheme.typography.bodySmall)
+                    Text("トラッキング: ${if (s.trackingHealthy) "正常" else "検出なし"} / LOD ${s.lod}", style = MaterialTheme.typography.bodySmall)
+                    Text("FPS: %.1f  推論: %.1fms".format(s.fps, s.inferenceMs), style = MaterialTheme.typography.bodySmall)
+                    Text("配信: ${s.rtmpState} @ ${s.bitrate / 1000}kbps", style = MaterialTheme.typography.bodySmall)
+                    Text("アバター: ${s.avatarName}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
 
         OutlinedButton(onClick = { central.requestStatus() }, enabled = state == BleCentral.ConnectionState.AUTHORIZED) {
-            Text("Refresh status")
+            Text("状態を更新")
         }
     }
 }

@@ -96,7 +96,17 @@ class SafetyGate {
                 }
             }
             OutputMode.PRIVACY -> {
-                // stays until the user switches back
+                // tracking stays alive; arm recovery the same way as FREEZE so the user can
+                // return to LIVE with a single action once tracking is verified (spec 7.3)
+                if (healthy) {
+                    val since = healthySince.updateAndGet { prev ->
+                        if (prev == 0L) tsMs else prev
+                    }
+                    if (tsMs - since >= RECOVERY_MS) recoveryArmed.value = true
+                } else {
+                    healthySince.set(0)
+                    recoveryArmed.value = false
+                }
             }
         }
     }
