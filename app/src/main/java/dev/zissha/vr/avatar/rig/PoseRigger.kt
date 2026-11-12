@@ -107,7 +107,9 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         val conv = rig.viewToAvatar
 
         // ---------------- root placement ----------------
-        val shoulderW = lm[11].distanceTo(lm[12])
+        val shoulderDx = lm[11].x - lm[12].x
+        val shoulderDy = lm[11].y - lm[12].y
+        val shoulderW = kotlin.math.hypot(shoulderDx.toDouble(), shoulderDy.toDouble()).toFloat()
         val hipCx = (lm[23].x + lm[24].x) / 2f
         val hipCy = (lm[23].y + lm[24].y) / 2f
         val ankleVisible = lm[27].visibility > 0.4f && lm[28].visibility > 0.4f

@@ -271,10 +271,14 @@ class Engine private constructor() {
     private fun onCameraBound(bound: BoundCamera) {
         lastBound = bound
         // output FBO is portrait: swap if the camera buffer is landscape
-        val (outW, outH) = if (bound.bufferWidth > bound.bufferHeight) {
-            bound.bufferHeight to bound.bufferWidth
+        val outW: Int
+        val outH: Int
+        if (bound.bufferWidth > bound.bufferHeight) {
+            outW = bound.bufferHeight
+            outH = bound.bufferWidth
         } else {
-            bound.bufferWidth to bound.bufferHeight
+            outW = bound.bufferWidth
+            outH = bound.bufferHeight
         }
         glRenderer.setOutputSize(outW, outH)
         glRenderer.rotationQuarterTurns = (bound.sensorOrientation / 90) % 4

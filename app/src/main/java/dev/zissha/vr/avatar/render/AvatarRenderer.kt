@@ -316,7 +316,7 @@ class AvatarRenderer {
             for (meshGpu in meshes) {
                 val mesh = doc.meshes[meshGpu.meshIndex]
                 for ((pi, gpu) in meshGpu.primitives.withIndex()) {
-                    val material = doc.materials.getOrNull(prim(mesh, pi).materialIndex) ?: continue
+                    val material = doc.materials.getOrNull(mesh.primitives[pi].materialIndex) ?: continue
                     val mode = material.alphaMode
                     if ((pass == 0 && mode != 0) || (pass == 1 && mode != 1) || (pass == 2 && mode != 2)) continue
                     uniform("uSkinned")?.let {

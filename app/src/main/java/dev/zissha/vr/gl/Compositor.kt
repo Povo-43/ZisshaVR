@@ -2,6 +2,7 @@ package dev.zissha.vr.gl
 
 import android.graphics.Bitmap
 import android.opengl.GLES30
+import android.opengl.GLES11Ext
 import android.util.Log
 import dev.zissha.vr.avatar.render.AvatarController
 import dev.zissha.vr.tracking.SegmentationResult
@@ -82,11 +83,12 @@ class Compositor(private val avatarController: AvatarController) {
         )
         quadVbo = IntArray(1).also { GLES30.glGenBuffers(1, it, 0) }[0]
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, quadVbo)
-        GLES30.glBufferData(
-            GLES30.GL_ARRAY_BUFFER, quad.size * 4,
-            ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).apply {
+        val quadBuffer = ByteBuffer.allocateDirect(quad.size * 4)
+            .order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
                 put(quad); position(0)
-            }, GLES30.GL_STATIC_DRAW,
+            }
+        GLES30.glBufferData(
+            GLES30.GL_ARRAY_BUFFER, quad.size * 4, quadBuffer, GLES30.GL_STATIC_DRAW,
         )
         quadVao = IntArray(1).also { GLES30.glGenVertexArrays(1, it, 0) }[0]
         GLES30.glBindVertexArray(quadVao)

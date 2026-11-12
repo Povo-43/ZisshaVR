@@ -98,7 +98,7 @@ class RtmpSession(private val context: Context) : ConnectChecker {
                 }
             }
             stream = newStream
-            encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(newStream.surfaceTexture)
+            encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(newStream.getSurfaceTexture())
             _state.value = StreamState.CONNECTING
             newStream.startStream(fullUrl)
             AppLog.i("RTMP stream starting to ${sanitizeUrl(baseUrl)} (key withheld, ${width}x$height@$fps ${bitrateKbps}kbps audio=$audioEnabled)")
@@ -129,7 +129,7 @@ class RtmpSession(private val context: Context) : ConnectChecker {
             stream!!
         }
         return try {
-            encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(target.surfaceTexture)
+            encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(target.getSurfaceTexture())
             target.startRecord(path) { status ->
                 when (status) {
                     com.pedro.library.base.recording.RecordController.Status.RECORDING,
@@ -259,7 +259,7 @@ class RtmpSession(private val context: Context) : ConnectChecker {
             retryJob = scope.launch {
                 delay(RETRY_DELAY_MS)
                 try {
-                    stream?.streamClient?.reTry(RETRY_DELAY_MS, reason)
+                    stream?.getStreamClient()?.reTry(RETRY_DELAY_MS, reason)
                 } catch (e: Exception) {
                     Log.w(TAG, "reTry failed", e)
                 }

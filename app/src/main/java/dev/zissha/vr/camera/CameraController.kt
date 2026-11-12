@@ -35,6 +35,10 @@ import kotlinx.coroutines.suspendCancellableCoroutine
     private val lifecycleOwner: LifecycleOwner,
 ) {
 
+    companion object {
+        private const val TAG = "CameraController"
+    }
+
     data class BoundCamera(
         val sensorOrientation: Int,
         val isFront: Boolean,

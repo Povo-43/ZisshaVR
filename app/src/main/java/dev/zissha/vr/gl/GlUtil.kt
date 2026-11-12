@@ -5,6 +5,7 @@ import android.opengl.EGLConfig
 import android.opengl.EGLContext
 import android.opengl.EGLDisplay
 import android.opengl.EGLSurface
+import android.opengl.GLES11Ext
 import android.opengl.GLES30
 import android.opengl.GLU
 import android.util.Log

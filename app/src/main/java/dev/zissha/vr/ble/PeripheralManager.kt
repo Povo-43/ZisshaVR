@@ -214,7 +214,7 @@ class PeripheralManager(private val context: Context) {
             }
             val frame = BleProtocol.decode(value)
             if (frame == null) {
-                if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_PDU, offset, null)
+                if (responseNeeded) gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, offset, null)
                 return
             }
             var responseStatus = BluetoothGatt.GATT_SUCCESS

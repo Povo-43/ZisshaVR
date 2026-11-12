@@ -396,7 +396,7 @@ class TrackingEngine(private val context: Context) {
                 reason = "pose_timeout"
             }
         } else {
-            val confidence = stablePose.confidence()
+            val confidence = trackingFrame.confidence()
             // hip center warp detection (normalized view space)
             val hipX = (stablePose.landmarks[23].x + stablePose.landmarks[24].x) / 2f
             val hipY = (stablePose.landmarks[23].y + stablePose.landmarks[24].y) / 2f

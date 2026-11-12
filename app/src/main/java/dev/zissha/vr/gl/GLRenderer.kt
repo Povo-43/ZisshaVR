@@ -118,10 +118,11 @@ class GLRenderer(
     fun setPreviewSurface(surface: Surface?) {
         handler.post {
             releasePreviewSurface()
-            if (surface != null && surface.isValid) {
-                previewSurface = surface
+            val s = surface
+            if (s != null && s.isValid) {
+                previewSurface = s
                 try {
-                    previewEglSurface = egl?.createWindowSurface(surface)
+                    previewEglSurface = egl?.createWindowSurface(s)
                 } catch (e: Exception) {
                     Log.e(TAG, "preview surface create failed", e)
                     previewSurface = null
@@ -134,10 +135,12 @@ class GLRenderer(
     fun setEncoderSurfaceTexture(surfaceTexture: SurfaceTexture?) {
         handler.post {
             releaseEncoderSurface()
-            if (surfaceTexture != null) {
-                encoderSurface = Surface(surfaceTexture)
+            val st = surfaceTexture
+            if (st != null) {
+                val surface = Surface(st)
+                encoderSurface = surface
                 try {
-                    encoderEglSurface = egl?.createWindowSurface(encoderSurface)
+                    encoderEglSurface = egl?.createWindowSurface(surface)
                 } catch (e: Exception) {
                     Log.e(TAG, "encoder surface create failed", e)
                     encoderSurface = null
@@ -233,7 +236,7 @@ class GLRenderer(
             if (!fromTick) {
                 st.updateTexImage()
                 st.getTransformMatrix(stMatrix)
-                tsNs = st.timestampValue
+                tsNs = st.timestamp
                 newFrame = true
                 lastCameraFrameTsMs = tsNs / 1_000_000L
             }

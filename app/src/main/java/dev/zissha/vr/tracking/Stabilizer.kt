@@ -18,7 +18,7 @@ class Stabilizer(
     private val maxSpeed: Float = 2.5f,
 ) {
 
-    private class LandmarkState {
+    private class LandmarkState(minCutoff: Float, beta: Float) {
         val filter = OneEuroFilter3(minCutoff, beta)
         var lastValid = Vec3()
         var lastVelocity = Vec3()
@@ -26,10 +26,10 @@ class Stabilizer(
         var consecutiveMissing = 0
     }
 
-    private val poseStates = Array(33) { LandmarkState() }
+    private val poseStates = Array(33) { LandmarkState(minCutoff, beta) }
 
     /** Per-hand states, keyed 0/1 by slot. */
-    private val handStates = Array(2) { Array(21) { LandmarkState() } }
+    private val handStates = Array(2) { Array(21) { LandmarkState(minCutoff, beta) } }
 
     private val blendshapeEma = HashMap<String, Float>()
     private var headQuat: Quat? = null

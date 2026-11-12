@@ -56,7 +56,7 @@ class SafetyGate {
                 }
                 OutputMode.LIVE -> {
                     // returning to LIVE is only allowed when recovery is armed (or gate is LIVE already)
-                    if (state.value == OutputMode.LIVE || recoveryArmed.get()) {
+                    if (state.value == OutputMode.LIVE || recoveryArmed.value) {
                         state.value = OutputMode.LIVE
                         lastTrigger.value = null
                         recoveryArmed.value = false
@@ -90,8 +90,7 @@ class SafetyGate {
                     val since = healthySince.updateAndGet { prev ->
                         if (prev == 0L) tsMs else prev
                     }
-                    if (tsMs - since >= RECOVERY_MS) recoveryArmed.value = true
-                } else {
+                    if (tsMs - since >= RECOVERY_MS) recoveryArmed.value = true                } else {
                     healthySince.set(0)
                     recoveryArmed.value = false
                 }

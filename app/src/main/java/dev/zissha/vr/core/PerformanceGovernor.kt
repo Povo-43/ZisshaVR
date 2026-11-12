@@ -55,16 +55,19 @@ class PerformanceGovernor(context: Context) {
     }
 
     fun start() {
-        if (registered || thermalListener == null || powerManager == null) {
-            if (thermalListener == null) {
-                // Below API 29: estimate from battery temperature unavailable; keep level 0.
+        if (registered) return
+        val listener = thermalListener
+        val pm = powerManager
+        if (listener == null || pm == null) {
+            if (listener == null) {
+                // Below API 29: thermal status API unavailable; keep level 0.
                 Log.w(TAG, "thermal status API unavailable (API < 29); governor disabled")
             }
             return
         }
         try {
-            powerManager.addOnThermalStatusChangedListener(mainExecutor(), thermalListener)
-            thermalStatus = powerManager.currentThermalStatus
+            pm.addOnThermalStatusChangedListener(mainExecutor(), listener)
+            thermalStatus = pm.currentThermalStatus
             applyThermal(thermalStatus)
             registered = true
         } catch (e: Exception) {
@@ -73,9 +76,11 @@ class PerformanceGovernor(context: Context) {
     }
 
     fun stop() {
-        if (!registered || thermalListener == null || powerManager == null) return
+        if (!registered) return
+        val listener = thermalListener ?: return
+        val pm = powerManager ?: return
         try {
-            powerManager.removeOnThermalStatusChangedListener(thermalListener)
+            pm.removeOnThermalStatusChangedListener(listener)
         } catch (e: Exception) {
             Log.w(TAG, "failed to unregister thermal listener", e)
         }
