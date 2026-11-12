@@ -1,0 +1,274 @@
+package dev.zissha.vr.avatar.rig
+
+import dev.zissha.vr.avatar.gltf.GltfDocument
+import dev.zissha.vr.avatar.gltf.VrmData
+import dev.zissha.vr.math.Mat4
+import dev.zissha.vr.math.Quat
+import dev.zissha.vr.math.Vec3
+import dev.zissha.vr.tracking.HandSkeleton
+import dev.zissha.vr.tracking.PoseResult
+
+/**
+ * Maps MediaPipe tracking results onto VRM humanoid bones (spec 4 / 3.1 Humanoid Bone Mapping).
+ *
+ * Strategy:
+ * - Limb bones are driven with direction-based FK: each segment's world rotation is the
+ *   shortest-arc rotation from its rest direction to the landmark-derived direction.
+ * - The head is driven by an orthonormal basis built from eye / mouth / ear landmarks.
+ * - The root follows the person's hip position scaled by the shoulder-width ratio, with the
+ *   feet clamped to the ground plane.
+ *
+ * View space: x right, y up, z toward the viewer. The composite camera image is mirrored
+ * (selfie view), so a person's anatomical left appears on the right side of the view, matching
+ * an avatar that faces the viewer.
+ */
+class PoseRigger(doc: GltfDocument, vrm: VrmData) {
+
+    private val rig = HumanoidRig(doc, vrm)
+
+    /** User scale multiplier applied on top of the tracking-derived scale. */
+    @Volatile var scaleMultiplier: Float = 1f
+
+    // Rest directions in avatar/world space
+    private var restUpperArmL: Vec3? = null
+    private var restLowerArmL: Vec3? = null
+    private var restUpperArmR: Vec3? = null
+    private var restLowerArmR: Vec3? = null
+    private var restUpperLegL: Vec3? = null
+    private var restLowerLegL: Vec3? = null
+    private var restUpperLegR: Vec3? = null
+    private var restLowerLegR: Vec3? = null
+    private var restTorsoUp: Vec3? = null
+    private var avatarShoulderWidth: Float = 0.3f
+    private var avatarHipsToFeet: Float = 0.9f
+
+    // smoothed root state
+    private var rootPos = Vec3(0f, 0f, 0f)
+    private var rootScale = 1f
+    private var initialized = false
+
+    init {
+        fun node(name: String) = rig.boneNode(name)
+        node("leftUpperArm")?.let { l ->
+            node("leftLowerArm")?.let { r -> restUpperArmL = rig.restDirection(l, r) }
+        }
+        node("leftLowerArm")?.let { l ->
+            node("leftHand")?.let { r -> restLowerArmL = rig.restDirection(l, r) }
+        }
+        node("rightUpperArm")?.let { l ->
+            node("rightLowerArm")?.let { r -> restUpperArmR = rig.restDirection(l, r) }
+        }
+        node("rightLowerArm")?.let { l ->
+            node("rightHand")?.let { r -> restLowerArmR = rig.restDirection(l, r) }
+        }
+        node("leftUpperLeg")?.let { l ->
+            node("leftLowerLeg")?.let { r -> restUpperLegL = rig.restDirection(l, r) }
+        }
+        node("leftLowerLeg")?.let { l ->
+            node("leftFoot")?.let { r -> restLowerLegL = rig.restDirection(l, r) }
+        }
+        node("rightUpperLeg")?.let { l ->
+            node("rightLowerLeg")?.let { r -> restUpperLegR = rig.restDirection(l, r) }
+        }
+        node("rightLowerLeg")?.let { l ->
+            node("rightFoot")?.let { r -> restLowerLegR = rig.restDirection(l, r) }
+        }
+        rig.boneNode("hips")?.let { hips ->
+            rig.boneNode("spine")?.let { spine ->
+                restTorsoUp = rig.restDirection(hips, spine)
+            } ?: rig.boneNode("chest")?.let { chest ->
+                restTorsoUp = rig.restDirection(hips, chest)
+            }
+        }
+        val ls = rig.boneNode("leftShoulder")?.let { rig.worldTranslation(it) }
+        val rs = rig.boneNode("rightShoulder")?.let { rig.worldTranslation(it) }
+        if (ls != null && rs != null) avatarShoulderWidth = (ls - rs).length().coerceAtLeast(0.05f)
+        val hips = rig.boneNode("hips")?.let { rig.worldTranslation(it) }
+        val footL = rig.boneNode("leftFoot")?.let { rig.worldTranslation(it) }
+        val footR = rig.boneNode("rightFoot")?.let { rig.worldTranslation(it) }
+        if (hips != null && footL != null && footR != null) {
+            avatarHipsToFeet = hips.y - ((footL.y + footR.y) / 2f).coerceAtLeast(0.1f)
+        }
+    }
+
+    /** The underlying rig; the renderer calls [rig.evaluate] after [applyPose]. */
+    val humanoidRig: HumanoidRig get() = rig
+
+    /**
+     * Drive the rig from a pose frame.
+     * @param viewWidth  world-space width of the visible frustum at the root plane
+     * @param viewHeight world-space height of the visible frustum at the root plane
+     * @param cameraHeight world-space Y of the scene camera
+     */
+    fun applyPose(pose: PoseResult, viewWidth: Float, viewHeight: Float, cameraHeight: Float, dt: Float) {
+        rig.resetOverrides()
+        val lm = pose.landmarks
+        val w = pose.worldLandmarks
+        val conv = rig.viewToAvatar
+
+        // ---------------- root placement ----------------
+        val shoulderW = lm[11].distanceTo(lm[12])
+        val hipCx = (lm[23].x + lm[24].x) / 2f
+        val hipCy = (lm[23].y + lm[24].y) / 2f
+        val ankleVisible = lm[27].visibility > 0.4f && lm[28].visibility > 0.4f
+
+        val personShoulderWorld = shoulderW * viewWidth
+        var targetScale = (personShoulderWorld / avatarShoulderWidth).coerceIn(0.35f, 2.5f) * scaleMultiplier
+        var targetPos = Vec3(
+            x = ((hipCx - 0.5f) * viewWidth) * (if (rig.facesViewer) 1f else -1f),
+            y = cameraHeight + (0.5f - hipCy) * viewHeight + avatarHipsToFeet * targetScale,
+            z = 0f,
+        )
+        if (ankleVisible) {
+            // feet on the ground: place the root so the ankles land slightly above y=0
+            val ankleCy = (lm[27].y + lm[28].y) / 2f
+            val ankleWorldY = cameraHeight + (0.5f - ankleCy) * viewHeight
+            targetPos = Vec3(targetPos.x, ankleWorldY + avatarHipsToFeet * targetScale - 0.03f, 0f)
+        }
+        if (!initialized) {
+            rootPos = targetPos
+            rootScale = targetScale
+            initialized = true
+        } else {
+            val k = (dt * 12f).coerceIn(0.05f, 1f)
+            rootPos = Vec3(
+                rootPos.x + (targetPos.x - rootPos.x) * k,
+                rootPos.y + (targetPos.y - rootPos.y) * k,
+                0f,
+            )
+            rootScale += (targetScale - rootScale) * k
+        }
+        rig.rootTranslation = rootPos
+        rig.rootScale = rootScale
+
+        // ---------------- torso ----------------
+        // world-space directions from landmarks (view space: x right, y down, z toward viewer)
+        fun toWorld(lmX: Float, lmY: Float, lmZ: Float): Vec3 {
+            val view = Vec3(lmX, -lmY, lmZ * Z_SIGN)
+            return conv.rotate(view)
+        }
+
+        val hipMidW = toWorld(
+            (w[23].x + w[24].x) / 2f, (w[23].y + w[24].y) / 2f, (w[23].z + w[24].z) / 2f,
+        )
+        val shoulderMidW = toWorld(
+            (w[11].x + w[12].x) / 2f, (w[11].y + w[12].y) / 2f, (w[11].z + w[12].z) / 2f,
+        )
+        val torsoUp = (shoulderMidW - hipMidW).normalized()
+
+        rig.boneNode("hips")?.let { hipsNode ->
+            val restUp = restTorsoUp ?: Vec3(0f, 1f, 0f)
+            val restWorldRot = rig.nodes[hipsNode].restWorld.extractRotation()
+            rig.worldRotationOverride[hipsNode] = Quat.fromToRotation(restUp, torsoUp) * restWorldRot
+        }
+        rig.boneNode("spine")?.let { spineNode ->
+            val restWorldRot = rig.nodes[spineNode].restWorld.extractRotation()
+            rig.worldRotationOverride[spineNode] = Quat.fromToRotation(Vec3(0f, 1f, 0f), torsoUp) * restWorldRot
+        }
+
+        // ---------------- arms ----------------
+        driveBone("leftUpperArm", w[11], w[13], restUpperArmL, ::toWorld)
+        driveBone("leftLowerArm", w[13], w[15], restLowerArmL, ::toWorld)
+        driveBone("rightUpperArm", w[12], w[14], restUpperArmR, ::toWorld)
+        driveBone("rightLowerArm", w[14], w[16], restLowerArmR, ::toWorld)
+
+        // ---------------- legs ----------------
+        driveBone("leftUpperLeg", w[23], w[25], restUpperLegL, ::toWorld)
+        driveBone("leftLowerLeg", w[25], w[27], restLowerLegL, ::toWorld)
+        driveBone("rightUpperLeg", w[24], w[26], restUpperLegR, ::toWorld)
+        driveBone("rightLowerLeg", w[26], w[28], restLowerLegR, ::toWorld)
+
+        // feet: ankle -> foot index
+        driveBone("leftFoot", w[27], w[31], Vec3(0f, -1f, 0f), ::toWorld)
+        driveBone("rightFoot", w[28], w[32], Vec3(0f, -1f, 0f), ::toWorld)
+
+        // ---------------- head ----------------
+        val eyeL = w[2]
+        val eyeR = w[5]
+        val mouthL = w[9]
+        val mouthR = w[10]
+        var right = toWorld(eyeL.x - eyeR.x, eyeL.y - eyeR.y, eyeL.z - eyeR.z)
+        var up = toWorld(
+            (eyeL.x + eyeR.x) / 2f - (mouthL.x + mouthR.x) / 2f,
+            (eyeL.y + eyeR.y) / 2f - (mouthL.y + mouthR.y) / 2f,
+            (eyeL.z + eyeR.z) / 2f - (mouthL.z + mouthR.z) / 2f,
+        )
+        right = right.normalized()
+        up = up.normalized()
+        if (right.length() > 1e-5f && up.length() > 1e-5f) {
+            // orthonormalize
+            up = (up - right * (right.dot(up))).normalized()
+            val forward = right.cross(up).normalized()
+            val basis = Mat4().setIdentity()
+            basis.m[0] = right.x; basis.m[1] = right.y; basis.m[2] = right.z
+            basis.m[4] = up.x; basis.m[5] = up.y; basis.m[6] = up.z
+            basis.m[8] = forward.x; basis.m[9] = forward.y; basis.m[10] = forward.z
+            val headQuat = basis.extractRotation()
+            rig.boneNode("neck")?.let { rig.worldRotationOverride[it] = headQuat }
+            rig.boneNode("head")?.let { rig.worldRotationOverride[it] = headQuat }
+        }
+    }
+
+    private fun driveBone(
+        boneName: String,
+        from: dev.zissha.vr.tracking.Landmark3,
+        to: dev.zissha.vr.tracking.Landmark3,
+        restDir: Vec3?,
+        toWorld: (Float, Float, Float) -> Vec3,
+    ) {
+        val node = rig.boneNode(boneName) ?: return
+        val rest = restDir ?: return
+        val desired = toWorld(to.x - from.x, to.y - from.y, to.z - from.z).normalized()
+        if (desired.length() < 1e-5f) return
+        val restWorldRot = rig.nodes[node].restWorld.extractRotation()
+        rig.worldRotationOverride[node] = Quat.fromToRotation(rest, desired) * restWorldRot
+    }
+
+    /** Drive finger bones from a tracked hand. */
+    fun applyHand(hand: HandSkeleton) {
+        val side = if (hand.isLeftHand) "left" else "right"
+        val wl = hand.worldLandmarks
+        val conv = rig.viewToAvatar
+        fun toWorldVec(l: dev.zissha.vr.tracking.Landmark3): Vec3 = conv.rotate(Vec3(l.x, -l.y, l.z * Z_SIGN))
+
+        // hand bone orientation: wrist -> middle MCP direction blended with thumb direction
+        rig.boneNode("${side}Hand")?.let { handNode ->
+            val desired = (toWorldVec(wl[9]) - toWorldVec(wl[0])).normalized()
+            val restWorldRot = rig.nodes[handNode].restWorld.extractRotation()
+            // hands rest along +Y (fingers continue the arm); use lower-arm continuation as rest
+            rig.worldRotationOverride[handNode] = Quat.fromToRotation(Vec3(0f, 1f, 0f), desired) * restWorldRot
+        }
+        driveFinger(side, "Thumb", intArrayOf(1, 2, 3, 4), wl, ::toWorldVec)
+        driveFinger(side, "Index", intArrayOf(5, 6, 7, 8), wl, ::toWorldVec)
+        driveFinger(side, "Middle", intArrayOf(9, 10, 11, 12), wl, ::toWorldVec)
+        driveFinger(side, "Ring", intArrayOf(13, 14, 15, 16), wl, ::toWorldVec)
+        driveFinger(side, "Little", intArrayOf(17, 18, 19, 20), wl, ::toWorldVec)
+    }
+
+    private fun driveFinger(
+        side: String,
+        finger: String,
+        lm: IntArray,
+        wl: List<dev.zissha.vr.tracking.Landmark3>,
+        toWorldVec: (dev.zissha.vr.tracking.Landmark3) -> Vec3,
+    ) {
+        val segments = arrayOf("Proximal", "Intermediate", "Distal")
+        for (s in 0 until 3) {
+            val bone = rig.boneNode("${side}${finger}${segments[s]}") ?: continue
+            val from = wl[lm[s]]
+            val to = wl[lm[s + 1]]
+            val desired = (toWorldVec(to) - toWorldVec(from)).normalized()
+            if (desired.length() < 1e-5f) continue
+            val restWorldRot = rig.nodes[bone].restWorld.extractRotation()
+            rig.worldRotationOverride[bone] = Quat.fromToRotation(Vec3(0f, 1f, 0f), desired) * restWorldRot
+        }
+    }
+
+    companion object {
+        /**
+         * MediaPipe world-landmark z axis sign relative to "toward the viewer".
+         * Tunable: flip if limb depth appears inverted on a device.
+         */
+        const val Z_SIGN = -1f
+    }
+}

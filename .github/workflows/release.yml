@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version name for unsigned CI build (no tag)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release APKs and publish to GitHub Releases
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle (with caching)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode signing keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            cat > keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/release.keystore
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+            echo "Keystore decoded from secrets"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "No keystore secret set; building debug-signed APKs"
+          fi
+
+      - name: Build release APKs (signed)
+        if: steps.keystore.outputs.signed == 'true'
+        run: ./gradlew :app:assembleRelease :remote:assembleRelease --stacktrace
+
+      - name: Build debug APKs (fallback, debug-signed)
+        if: steps.keystore.outputs.signed != 'true'
+        run: ./gradlew :app:assembleDebug :remote:assembleDebug --stacktrace
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk dist/ZisshaVR-${{ github.ref_name }}.apk
+            cp remote/build/outputs/apk/release/remote-release.apk dist/ZisshaVR-Remote-${{ github.ref_name }}.apk
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk dist/ZisshaVR-${{ github.ref_name }}-debug.apk
+            cp remote/build/outputs/apk/debug/remote-debug.apk dist/ZisshaVR-Remote-${{ github.ref_name }}-debug.apk
+          fi
+          cd dist
+          sha256sum *.apk > SHA256SUMS.txt
+          ls -la
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "ZisshaVR ${{ github.ref_name }}" \
+            --notes "See docs/IMPLEMENTATION.md for feature status and usage notes." \
+            dist/*
+        continue-on-error: false
+
+      - name: Upload workflow artifacts (manual runs)
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZisshaVR-release
+          path: dist/*

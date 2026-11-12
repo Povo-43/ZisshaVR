@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+*/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Secrets (never commit)
+*.jks
+*.keystore
+keystore.properties
