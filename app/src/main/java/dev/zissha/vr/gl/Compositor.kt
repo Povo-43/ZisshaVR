@@ -63,6 +63,13 @@ class Compositor(private val avatarController: AvatarController) {
     /** Enabled from settings: draw the detected pose skeleton over the live composite. */
     @Volatile var skeletonOverlay: Boolean = false
 
+    /** Camera transform applied to the composite (from the bound camera). */
+    @Volatile var rotationQuarterTurns: Int = 0
+    @Volatile var mirror: Boolean = false
+
+    /** Letterbox rect in output NDC [-1..1]: left, top, right, bottom (updated in drawOutput). */
+    private val letterboxRect = FloatArray(4)
+
     // FBOs
     private var trackFbo: GlUtil.Fbo? = null
     private var avatarFbo: GlUtil.Fbo? = null
@@ -266,19 +273,46 @@ class Compositor(private val avatarController: AvatarController) {
      */
     private fun drawSkeletonOverlay(landmarks: List<Landmark3>) {
         if (landmarks.size < 33) return
+        val l = letterboxRect[0]
+        val t = letterboxRect[1]
+        val r = letterboxRect[2]
+        val b = letterboxRect[3]
+        val sw = r - l
+        val sh = b - t
         var w = 0
         var i = 0
         while (i < CONNECTIONS.size && w + 4 <= skeletonCut.size) {
             val a = CONNECTIONS[i]
-            val b = CONNECTIONS[i + 1]
+            val bIdx = CONNECTIONS[i + 1]
             i += 2
             val la = landmarks[a]
-            val lb = landmarks[b]
+            val lb = landmarks[bIdx]
             if (la.visibility < 0.3f || lb.visibility < 0.3f) continue
-            skeletonCut[w++] = la.x * 2f - 1f
-            skeletonCut[w++] = 1f - la.y * 2f
-            skeletonCut[w++] = lb.x * 2f - 1f
-            skeletonCut[w++] = 1f - lb.y * 2f
+            var xa = la.x
+            var ya = la.y
+            var xb = lb.x
+            var yb = lb.y
+            // Map normalized image coords (x right, y down) through the camera transform
+            // (rotation + mirror) so the overlay matches the displayed composite.
+            val m = mirror
+            val q = rotationQuarterTurns
+            fun transform(x: Float, y: Float): FloatArray {
+                var nx = x
+                var ny = y
+                if (m) nx = 1f - nx
+                when (q) {
+                    1 -> { val tmp = nx; nx = 1f - ny; ny = tmp }   // 90 deg CW
+                    2 -> { nx = 1f - nx; ny = 1f - ny }           // 180 deg
+                    3 -> { val tmp = nx; nx = ny; ny = 1f - tmp } // 270 deg CW
+                }
+                return floatArrayOf(nx, ny)
+            }
+            val pa = transform(xa, ya)
+            val pb = transform(xb, yb)
+            skeletonCut[w++] = l + pa[0] * sw
+            skeletonCut[w++] = t + pa[1] * sh
+            skeletonCut[w++] = l + pb[0] * sw
+            skeletonCut[w++] = t + pb[1] * sh
         }
         if (w == 0) return
         var buf = skeletonBuffer
@@ -331,7 +365,14 @@ class Compositor(private val avatarController: AvatarController) {
         } else if (dstAspect < srcAspect) {
             vh = (surfaceWidth / srcAspect).toInt().coerceIn(1, surfaceHeight)
         }
-        GLES30.glViewport((surfaceWidth - vw) / 2, (surfaceHeight - vh) / 2, vw, vh)
+        val vx = (surfaceWidth - vw) / 2f
+        val vy = (surfaceHeight - vh) / 2f
+        GLES30.glViewport(vx.toInt(), vy.toInt(), vw, vh)
+        // Remember the letterbox rect in output NDC so the skeleton overlay can map onto it.
+        letterboxRect[0] = vx / surfaceWidth * 2f - 1f
+        letterboxRect[1] = 1f - (vy + vh) / surfaceHeight * 2f
+        letterboxRect[2] = (vx + vw) / surfaceWidth * 2f - 1f
+        letterboxRect[3] = 1f - vy / surfaceHeight * 2f
         GLES30.glUseProgram(blitProgram)
         GLES30.glBindVertexArray(quadVao)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)

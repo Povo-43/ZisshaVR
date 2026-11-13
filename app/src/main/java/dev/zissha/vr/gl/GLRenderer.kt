@@ -77,6 +77,16 @@ class GLRenderer(
     /** Composite the detected pose skeleton onto the live output (debug / alignment aid). */
     @Volatile var skeletonOverlay: Boolean = false
 
+    /** Push the camera transform to the compositor so the skeleton overlay matches the display. */
+    fun setCameraTransform(turns: Int, mirror: Boolean) {
+        this.rotationQuarterTurns = turns
+        this.mirror = mirror
+        compositor?.let {
+            it.rotationQuarterTurns = turns
+            it.mirror = mirror
+        }
+    }
+
     private var lastRenderUptimeMs = 0L
     private var lastCameraFrameTsMs = 0L
     private var frameCount = 0L

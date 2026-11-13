@@ -136,6 +136,10 @@ CI(ubuntu-latest + JDK17 + Android SDK 35)での検証状況:
 - **アスペクト比**: プレビューはレターボックスで元のアスペクト比を維持
 - **自動復帰**: 自動発動のFREEZE/PRIVACYが安定後に自動でLIVEへ(設定、既定ON)
 
+コード解析で修正(v0.1.8、実機未検証):
+
+- **横向き/ミラーでの骨格オーバーレイずれ**: カメラのセンサー回転(0/90/180/270度)、左右ミラー、レターボックスをすべて考慮し、MediaPipeの検出座標を映像上に正しく重ねるようGLRenderer.compositorにカメラ変換を伝播
+
 **まだ未検証**の項目と確認すべき内容:
 
 1. カメラ回転・フロントミラーの向き(端末のsensorOrientation差異)→ `GLRenderer.rotationQuarterTurns` / `PoseRigger.Z_SIGN`
