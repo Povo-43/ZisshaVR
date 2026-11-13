@@ -405,23 +405,30 @@ class Compositor(private val avatarController: AvatarController) {
     }
 
     private fun uploadMask(seg: SegmentationResult) {
-        if (seg.width != MASK_SIZE || seg.height != MASK_SIZE) {
-            Log.w(TAG, "unexpected mask size ${seg.width}x${seg.height}; expected $MASK_SIZE")
-        }
-        val w = minOf(seg.width, MASK_SIZE)
-        val h = minOf(seg.height, MASK_SIZE)
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskRawTex)
-        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
-        val bytes = ByteArray(w * h)
-        for (y in 0 until h) {
-            val srcRow = y * seg.width
-            for (x in 0 until w) {
-                bytes[y * w + x] = (seg.mask[srcRow + x].coerceIn(0f, 1f) * 255f).toInt().toByte()
+        if (seg.width <= 0 || seg.height <= 0 || seg.mask.isEmpty()) return
+        // MediaPipe returns masks at the *input image* size, which follows the tracking frame
+        // aspect. The composite shader samples the mask with normalized UV over the whole output,
+        // so the entire mask must be resampled into the square texture; copying a cropped corner
+        // (as before) shifted/scaled the person mask.
+        val bytes = ByteArray(MASK_SIZE * MASK_SIZE)
+        val stepX = seg.width.toFloat() / MASK_SIZE
+        val stepY = seg.height.toFloat() / MASK_SIZE
+        for (y in 0 until MASK_SIZE) {
+            val sy = (y * stepY).toInt().coerceIn(0, seg.height - 1)
+            val srcRow = sy * seg.width
+            val dstRow = y * MASK_SIZE
+            for (x in 0 until MASK_SIZE) {
+                val sx = (x * stepX).toInt().coerceIn(0, seg.width - 1)
+                val idx = srcRow + sx
+                val v = if (idx < seg.mask.size) seg.mask[idx].coerceIn(0f, 1f) else 0f
+                bytes[dstRow + x] = (v * 255f).toInt().toByte()
             }
         }
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, maskRawTex)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
         val bb = ByteBuffer.allocateDirect(bytes.size).put(bytes).apply { position(0) }
         GLES30.glTexSubImage2D(
-            GLES30.GL_TEXTURE_2D, 0, 0, 0, w, h,
+            GLES30.GL_TEXTURE_2D, 0, 0, 0, MASK_SIZE, MASK_SIZE,
             GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, bb,
         )
         maskHasData = true
