@@ -208,11 +208,17 @@ class Compositor(private val avatarController: AvatarController) {
 
         // ---- pass 1: tracking input (runs in every mode so recovery detection keeps working;
         //      the readback is internal processing, never output - spec 7.1) ----
+        // The camera is drawn into the tracking FBO with exactly the same transform as the
+        // composite, so its rows equal the composite's rows. The final blit samples the composite
+        // top-down, therefore the readback bitmap (row 0 = glReadPixels row 0 = the FBO's row 0)
+        // is in the *same* top-down orientation as the displayed preview. Adding an extra flip
+        // here (v0.1.9) mirrored the landmarks vertically, which inverted every tracked direction
+        // applied to the avatar while the skeleton overlay happened to compensate for it.
         var readback: ByteBuffer? = null
         trackFbo!!.bind()
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-        drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram, flipV = true)
+        drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram, flipV = false)
         readback = readTrackFbo()
 
         // ---- pass 2: mask ------------------------------------------------------------
@@ -298,10 +304,12 @@ class Compositor(private val avatarController: AvatarController) {
             val la = landmarks[a]
             val lb = landmarks[bIdx]
             if (la.visibility < 0.3f || lb.visibility < 0.3f) continue
+            // Landmarks are already in display orientation (y down); the composite is blitted to
+            // the screen in the same top-down order, so x/y map straight onto NDC.
             skeletonCut[w++] = la.x * 2f - 1f
-            skeletonCut[w++] = 1f - la.y * 2f
+            skeletonCut[w++] = la.y * 2f - 1f
             skeletonCut[w++] = lb.x * 2f - 1f
-            skeletonCut[w++] = 1f - lb.y * 2f
+            skeletonCut[w++] = lb.y * 2f - 1f
         }
         if (w == 0) return
         var buf = skeletonBuffer

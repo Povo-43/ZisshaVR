@@ -69,7 +69,8 @@ class AvatarController(val renderer: AvatarRenderer) {
             Log.i(
                 TAG,
                 "rig ready: bones=${vrm.humanoidBones.size} expressions=${vrm.expressions.size} " +
-                    "springJoints=${spring?.jointCount ?: 0} facesViewer=${rig!!.facesViewer}",
+                    "springJoints=${spring?.jointCount ?: 0} " +
+                    "restYawed=${rig!!.restFacingFlipped}",
             )
         }
         renderer.skinRig = rig

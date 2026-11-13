@@ -18,9 +18,10 @@ import dev.zissha.vr.tracking.PoseResult
  * - The root follows the person's hip position scaled by the shoulder-width ratio, with the
  *   feet clamped to the ground plane.
  *
- * View space: x right, y up, z toward the viewer. The composite camera image is mirrored
- * (selfie view), so a person's anatomical left appears on the right side of the view, matching
- * an avatar that faces the viewer.
+ * View space: x right, y up, z toward the viewer, and the tracking input is the *displayed*
+ * (mirrored, selfie) image, so landmark y is "down on screen" exactly like the composite. The
+ * humanoid side naming lines up with MediaPipe's own anatomical labels because both are expressed
+ * on the mirrored image; [HumanoidRig] yaws VRM 0.x models so the avatar faces the viewer.
  */
 class PoseRigger(doc: GltfDocument, vrm: VrmData) {
 
@@ -93,12 +94,18 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
                 restTorsoUp = rig.restDirection(hips, chest)
             }
         }
-        val ls = rig.boneNode("leftShoulder")?.let { rig.worldTranslation(it) }
-        val rs = rig.boneNode("rightShoulder")?.let { rig.worldTranslation(it) }
+        // Read the rest pose, not the evaluated world matrices: this constructor runs before the
+        // first rig.evaluate(), so worldTranslation() would still return identity (all zeros) and
+        // the shoulder width would collapse to the 0.05 floor, pinning the tracking scale at the
+        // 2.5x clamp and making the avatar permanently oversized.
+        fun restTranslation(name: String): Vec3? =
+            rig.boneNode(name)?.let { rig.nodes[it].restWorld.extractTranslation() }
+        val ls = restTranslation("leftShoulder")
+        val rs = restTranslation("rightShoulder")
         if (ls != null && rs != null) avatarShoulderWidth = (ls - rs).length().coerceAtLeast(0.05f)
-        val hips = rig.boneNode("hips")?.let { rig.worldTranslation(it) }
-        val footL = rig.boneNode("leftFoot")?.let { rig.worldTranslation(it) }
-        val footR = rig.boneNode("rightFoot")?.let { rig.worldTranslation(it) }
+        val hips = restTranslation("hips")
+        val footL = restTranslation("leftFoot")
+        val footR = restTranslation("rightFoot")
         if (hips != null && footL != null && footR != null) {
             avatarHipsToFeet = hips.y - ((footL.y + footR.y) / 2f).coerceAtLeast(0.1f)
         }
@@ -152,8 +159,11 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
             val hipCy = (lm[23].y + lm[24].y) / 2f
             val targetScale =
                 (personShoulderWorld / avatarShoulderWidth).coerceIn(0.3f, 2.5f) * scaleMultiplier
+            // Image x and view x point the same way (the mirrored camera transform is already
+            // baked into the tracking input), so the root offset is never side-inverted. The rest
+            // yaw in HumanoidRig handles making the model face the viewer.
             val targetHip = Vec3(
-                x = (hipCx - 0.5f) * viewWidth * (if (rig.facesViewer) 1f else -1f),
+                x = (hipCx - 0.5f) * viewWidth,
                 y = cameraHeight - (hipCy - 0.5f) * viewHeight,
                 z = 0f,
             )

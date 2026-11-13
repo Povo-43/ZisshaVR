@@ -34,8 +34,10 @@ class HumanoidRig(val doc: GltfDocument, val vrm: VrmData) {
     var rootTranslation: Vec3 = Vec3.ZERO
     var rootScale: Float = 1f
 
-    /** Detected avatar facing: true when the model faces +Z in glTF space (toward the viewer). */
+    /** True when the model faces +Z in glTF space (toward the viewer) after the rest yaw. */
     val facesViewer: Boolean
+    /** True when the loaded model faced -Z and had to be yawed 180 degrees to face the viewer. */
+    val restFacingFlipped: Boolean
     /** Multiplier applied to view-space directions to align the avatar with the tracked person. */
     val viewToAvatar: Quat
 
@@ -57,15 +59,48 @@ class HumanoidRig(val doc: GltfDocument, val vrm: VrmData) {
         localScales = Array(nodes.size) { Vec3(1f, 1f, 1f) }
         worldMatrices = Array(nodes.size) { Mat4.identity() }
 
-        // Detect facing direction from the T-pose arm positions (left arm on +X => model faces -Z).
+        // Detect the rest facing direction from the T-pose arm positions. A humanoid facing the
+        // viewer (+Z) has its anatomical left on +X, so "left arm on +X" means it already faces the
+        // camera. VRM 0.x models face -Z (left arm on -X); they are yawed 180 degrees here.
+        //
+        // The yaw matters: the tracking input is the mirrored (selfie) image, so MediaPipe's
+        // anatomical labels sit on the screen the same way they do for a model facing the camera
+        // (index 11 "left shoulder" is on the right half of the image, exactly like the avatar's
+        // own left arm once it faces the viewer). Driving the bones with those landmarks only lines
+        // up visually when the model faces the viewer, so the rest yaw is baked into the rig (rest
+        // directions, world rotations, skin matrices, spring bones) and every downstream
+        // computation can use plain view-space directions.
         val lUpper = humanoidBones["leftUpperArm"]
         val rUpper = humanoidBones["rightUpperArm"]
-        facesViewer = if (lUpper != null && rUpper != null) {
-            nodes[lUpper].restWorld.extractTranslation().x < nodes[rUpper].restWorld.extractTranslation().x
+        val restFacesViewer = if (lUpper != null && rUpper != null) {
+            nodes[lUpper].restWorld.extractTranslation().x > nodes[rUpper].restWorld.extractTranslation().x
         } else {
             true
         }
-        viewToAvatar = if (facesViewer) Quat.IDENTITY else VIEW_FLIP
+        restFacingFlipped = !restFacesViewer
+        if (restFacingFlipped) applyRestYaw(VIEW_FLIP)
+        facesViewer = true
+        viewToAvatar = Quat.IDENTITY
+    }
+
+    /**
+     * Yaw the whole rest pose (and every cached rest world matrix) about the world origin. Applied
+     * before anything else reads [GltfNode.restWorld], so the rest directions, hip pivot and bone
+     * rotations all describe the same "facing the viewer" space the tracking is expressed in.
+     */
+    private fun applyRestYaw(yaw: Quat) {
+        val yawMatrix = Mat4().setFromTrs(Vec3.ZERO, yaw, Vec3(1f, 1f, 1f))
+        for (root in doc.sceneRoots) {
+            if (root !in nodes.indices) continue
+            val node = nodes[root]
+            node.translation = yaw.rotate(node.translation)
+            node.rotation = (yaw * node.rotation).normalized()
+            node.restLocal = Mat4().setFromTrs(node.translation, node.rotation, node.scale)
+        }
+        // yaw is applied above every root, so every node's rest world matrix is premultiplied by it.
+        for (node in nodes) {
+            node.restWorld = Mat4().mul(yawMatrix, node.restWorld)
+        }
     }
 
     fun hasBone(name: String): Boolean = humanoidBones.containsKey(name)
