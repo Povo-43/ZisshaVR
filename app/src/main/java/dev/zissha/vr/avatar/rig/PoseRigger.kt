@@ -229,7 +229,11 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
 
         // ---------------- head ----------------
         if (visible(2) && visible(5) && visible(9) && visible(10)) {
-            var right = viewDir(lm[2].x - lm[5].x, lm[2].y - lm[5].y, wZ(2) - wZ(5))
+            // Use right_eye - left_eye for the avatar's right vector.
+            // In the mirrored selfie view: left eye (idx 2) is on image right, right eye (idx 5) on image left.
+            // right_eye - left_eye points to the person's anatomical right (image left = -X),
+            // which corresponds to the avatar's right (+X) after the rest yaw aligns the model to face the viewer.
+            var right = viewDir(lm[5].x - lm[2].x, lm[5].y - lm[2].y, wZ(5) - wZ(2))
             var up = viewDir(
                 (lm[2].x + lm[5].x) / 2f - (lm[9].x + lm[10].x) / 2f,
                 (lm[2].y + lm[5].y) / 2f - (lm[9].y + lm[10].y) / 2f,
