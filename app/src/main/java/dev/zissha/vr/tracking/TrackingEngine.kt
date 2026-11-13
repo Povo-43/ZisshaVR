@@ -47,8 +47,6 @@ class TrackingEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "TrackingEngine"
-        const val TRACK_W = 320
-        const val TRACK_H = 180
         private const val RESULT_HISTORY = 8
         private const val CONFIDENCE_GATE = 0.25f
         private const val WARP_SPEED = 1.8f // normalized units per second
@@ -85,7 +83,7 @@ class TrackingEngine(private val context: Context) {
 
     private val pending = ArrayBlockingQueue<CameraFrame>(2)
 
-    private data class CameraFrame(val tsMs: Long, val rgba: ByteBuffer)
+    private data class CameraFrame(val tsMs: Long, val rgba: ByteBuffer, val width: Int, val height: Int)
 
     private val history = ArrayDeque<TrackingFrame>()
     private val historyLock = Any()
@@ -137,14 +135,15 @@ class TrackingEngine(private val context: Context) {
     }
 
     /** Called from the GL thread. Copies the frame buffer and hands it to the tracking thread. */
-    fun submitFrame(tsMs: Long, rgba: ByteBuffer) {
+    fun submitFrame(tsMs: Long, rgba: ByteBuffer, width: Int, height: Int) {
         if (!running) return
+        if (width <= 0 || height <= 0 || rgba.remaining() < width * height * 4) return
         // Keep at most the newest frames; drop stale ones to bound latency.
         while (pending.size >= 2) pending.poll()
         val copy = ByteBuffer.allocateDirect(rgba.remaining()).order(ByteOrder.nativeOrder())
         copy.put(rgba)
         copy.flip()
-        pending.offer(CameraFrame(tsMs, copy))
+        pending.offer(CameraFrame(tsMs, copy, width, height))
     }
 
     private fun createTasks() {
@@ -269,8 +268,12 @@ class TrackingEngine(private val context: Context) {
     private fun processFrame(frame: CameraFrame) {
         if (frame.tsMs <= lastTsMs) return
         lastTsMs = frame.tsMs
-        val bmp = frameBitmap
-            ?: Bitmap.createBitmap(TRACK_W, TRACK_H, Bitmap.Config.ARGB_8888).also { frameBitmap = it }
+        var bmp = frameBitmap
+        if (bmp == null || bmp.width != frame.width || bmp.height != frame.height) {
+            bmp?.recycle()
+            bmp = Bitmap.createBitmap(frame.width, frame.height, Bitmap.Config.ARGB_8888)
+            frameBitmap = bmp
+        }
         bmp.copyPixelsFromBuffer(frame.rgba)
         val mpImage = BitmapImageBuilder(bmp).build()
 

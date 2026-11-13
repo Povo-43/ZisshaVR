@@ -77,14 +77,10 @@ class GLRenderer(
     /** Composite the detected pose skeleton onto the live output (debug / alignment aid). */
     @Volatile var skeletonOverlay: Boolean = false
 
-    /** Push the camera transform to the compositor so the skeleton overlay matches the display. */
+    /** Set the camera transform used by the compositor (rotation/mirror for the whole pipeline). */
     fun setCameraTransform(turns: Int, mirror: Boolean) {
         this.rotationQuarterTurns = turns
         this.mirror = mirror
-        compositor?.let {
-            it.rotationQuarterTurns = turns
-            it.mirror = mirror
-        }
     }
 
     private var lastRenderUptimeMs = 0L
@@ -325,7 +321,9 @@ class GLRenderer(
                 tracking, segmentationEnabled, gateMode, trackingHealthy, dtSec,
             )
             if (newFrame && readback != null) {
-                trackingEngine.submitFrame(tsMs, readback)
+                trackingEngine.submitFrame(
+                    tsMs, readback, compositor.trackWidth, compositor.trackHeight,
+                )
             }
 
             // outputs

@@ -15,8 +15,8 @@ android {
         applicationId = "dev.zissha.remote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.8"
+        versionCode = 9
+        versionName = "0.1.9"
     }
 
     val keystorePropsFile = rootProject.file("keystore.properties")

@@ -28,8 +28,9 @@ class Compositor(private val avatarController: AvatarController) {
 
     companion object {
         private const val TAG = "Compositor"
-        const val TRACK_W = dev.zissha.vr.tracking.TrackingEngine.TRACK_W
-        const val TRACK_H = dev.zissha.vr.tracking.TrackingEngine.TRACK_H
+
+        /** Long side of the tracking frame; the short side follows the composite aspect. */
+        private const val TRACK_LONG_SIDE = 320
         const val MASK_SIZE = 256
         private const val RING_FRAMES = 2
 
@@ -63,12 +64,15 @@ class Compositor(private val avatarController: AvatarController) {
     /** Enabled from settings: draw the detected pose skeleton over the live composite. */
     @Volatile var skeletonOverlay: Boolean = false
 
-    /** Camera transform applied to the composite (from the bound camera). */
-    @Volatile var rotationQuarterTurns: Int = 0
-    @Volatile var mirror: Boolean = false
-
-    /** Letterbox rect in output NDC [-1..1]: left, top, right, bottom (updated in drawOutput). */
-    private val letterboxRect = FloatArray(4)
+    /**
+     * Tracking frame size. Kept at the composite aspect ratio: the camera is drawn into this FBO
+     * with the same rotation/mirror as the output, so MediaPipe sees an undistorted person and the
+     * normalized landmarks map 1:1 onto the composite.
+     */
+    var trackWidth = 320
+        private set
+    var trackHeight = 180
+        private set
 
     // FBOs
     private var trackFbo: GlUtil.Fbo? = null
@@ -143,10 +147,21 @@ class Compositor(private val avatarController: AvatarController) {
         if (w == width && h == height && compositeFbo != null) return
         width = w
         height = h
+        // Tracking frame follows the composite aspect (portrait stays portrait) so the model does
+        // not see a horizontally squashed person.
+        if (width >= height) {
+            trackWidth = TRACK_LONG_SIDE
+            trackHeight = ((TRACK_LONG_SIDE * height.toFloat() / width).toInt() / 2 * 2)
+                .coerceAtLeast(2)
+        } else {
+            trackHeight = TRACK_LONG_SIDE
+            trackWidth = ((TRACK_LONG_SIDE * width.toFloat() / height).toInt() / 2 * 2)
+                .coerceAtLeast(2)
+        }
         trackFbo?.release()
         avatarFbo?.release()
         compositeFbo?.release()
-        trackFbo = GlUtil.createFbo(TRACK_W, TRACK_H)
+        trackFbo = GlUtil.createFbo(trackWidth, trackHeight)
         avatarFbo = GlUtil.createFbo(width, height, withDepth = true)
         compositeFbo = GlUtil.createFbo(width, height)
         // ring textures resize
@@ -197,7 +212,7 @@ class Compositor(private val avatarController: AvatarController) {
         trackFbo!!.bind()
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-        drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram)
+        drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram, flipV = true)
         readback = readTrackFbo()
 
         // ---- pass 2: mask ------------------------------------------------------------
@@ -227,7 +242,7 @@ class Compositor(private val avatarController: AvatarController) {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glDisable(GLES30.GL_DEPTH_TEST)
         if (gateMode != OutputMode.PRIVACY) {
-            drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram)
+            drawCamera(cameraTex, stMatrix, rotation, mirror, 1f, cameraProgram, flipV = false)
         }
         // avatar layer with person mask
         GLES30.glUseProgram(maskedOverProgram)
@@ -268,17 +283,12 @@ class Compositor(private val avatarController: AvatarController) {
 
     /**
      * Draw the detected pose skeleton (33 landmarks, normalized image coords with y down) as NDC
-     * lines. The tracking image shares the composite's UV mapping, so the normalized coordinates
-     * map straight onto the composite [-1,1] range.
+     * lines. The tracking frame is rendered with exactly the same camera transform as the
+     * composite (rotation/mirror already applied), so the normalized landmarks map straight onto
+     * the composite [-1,1] range.
      */
     private fun drawSkeletonOverlay(landmarks: List<Landmark3>) {
         if (landmarks.size < 33) return
-        val l = letterboxRect[0]
-        val t = letterboxRect[1]
-        val r = letterboxRect[2]
-        val b = letterboxRect[3]
-        val sw = r - l
-        val sh = b - t
         var w = 0
         var i = 0
         while (i < CONNECTIONS.size && w + 4 <= skeletonCut.size) {
@@ -288,31 +298,10 @@ class Compositor(private val avatarController: AvatarController) {
             val la = landmarks[a]
             val lb = landmarks[bIdx]
             if (la.visibility < 0.3f || lb.visibility < 0.3f) continue
-            var xa = la.x
-            var ya = la.y
-            var xb = lb.x
-            var yb = lb.y
-            // Map normalized image coords (x right, y down) through the camera transform
-            // (rotation + mirror) so the overlay matches the displayed composite.
-            val m = mirror
-            val q = rotationQuarterTurns
-            fun transform(x: Float, y: Float): FloatArray {
-                var nx = x
-                var ny = y
-                if (m) nx = 1f - nx
-                when (q) {
-                    1 -> { val tmp = nx; nx = 1f - ny; ny = tmp }   // 90 deg CW
-                    2 -> { nx = 1f - nx; ny = 1f - ny }           // 180 deg
-                    3 -> { val tmp = nx; nx = ny; ny = 1f - tmp } // 270 deg CW
-                }
-                return floatArrayOf(nx, ny)
-            }
-            val pa = transform(xa, ya)
-            val pb = transform(xb, yb)
-            skeletonCut[w++] = l + pa[0] * sw
-            skeletonCut[w++] = t + pa[1] * sh
-            skeletonCut[w++] = l + pb[0] * sw
-            skeletonCut[w++] = t + pb[1] * sh
+            skeletonCut[w++] = la.x * 2f - 1f
+            skeletonCut[w++] = 1f - la.y * 2f
+            skeletonCut[w++] = lb.x * 2f - 1f
+            skeletonCut[w++] = 1f - lb.y * 2f
         }
         if (w == 0) return
         var buf = skeletonBuffer
@@ -368,11 +357,6 @@ class Compositor(private val avatarController: AvatarController) {
         val vx = (surfaceWidth - vw) / 2f
         val vy = (surfaceHeight - vh) / 2f
         GLES30.glViewport(vx.toInt(), vy.toInt(), vw, vh)
-        // Remember the letterbox rect in output NDC so the skeleton overlay can map onto it.
-        letterboxRect[0] = vx / surfaceWidth * 2f - 1f
-        letterboxRect[1] = 1f - (vy + vh) / surfaceHeight * 2f
-        letterboxRect[2] = (vx + vw) / surfaceWidth * 2f - 1f
-        letterboxRect[3] = 1f - vy / surfaceHeight * 2f
         GLES30.glUseProgram(blitProgram)
         GLES30.glBindVertexArray(quadVao)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
@@ -389,6 +373,7 @@ class Compositor(private val avatarController: AvatarController) {
         mirror: Boolean,
         brightness: Float,
         program: Int,
+        flipV: Boolean,
     ) {
         GLES30.glUseProgram(program)
         GLES30.glBindVertexArray(quadVao)
@@ -398,13 +383,14 @@ class Compositor(private val avatarController: AvatarController) {
         uniform(program, "uSTMatrix")?.let { GLES30.glUniformMatrix4fv(it, 1, false, stMatrix, 0) }
         uniform(program, "uRotation")?.let { GLES30.glUniform1i(it, rotation) }
         uniform(program, "uMirror")?.let { GLES30.glUniform1f(it, if (mirror) 1f else 0f) }
+        uniform(program, "uFlipV")?.let { GLES30.glUniform1f(it, if (flipV) 1f else 0f) }
         uniform(program, "uBrightness")?.let { GLES30.glUniform1f(it, brightness) }
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 6)
         GLES30.glBindVertexArray(0)
     }
 
     private fun readTrackFbo(): ByteBuffer? {
-        val needed = TRACK_W * TRACK_H * 4
+        val needed = trackWidth * trackHeight * 4
         var buf = trackingReadback
         if (buf == null || buf.capacity() != needed) {
             buf = ByteBuffer.allocateDirect(needed).order(ByteOrder.nativeOrder())
@@ -412,7 +398,7 @@ class Compositor(private val avatarController: AvatarController) {
         }
         buf.clear()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, trackFbo!!.id)
-        GLES30.glReadPixels(0, 0, TRACK_W, TRACK_H, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
+        GLES30.glReadPixels(0, 0, trackWidth, trackHeight, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         buf.position(0)
         return buf

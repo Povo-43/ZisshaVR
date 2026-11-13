@@ -30,11 +30,15 @@ uniform samplerExternalOES uTex;
 uniform mat4 uSTMatrix;
 uniform int uRotation;   // 0..3 quarter turns applied to the image for display
 uniform float uMirror;   // 1.0 = horizontally mirrored (front camera)
+uniform float uFlipV;    // 1.0 = flip vertically (tracking readback: FBO rows are bottom-up)
 uniform float uBrightness;
 out vec4 fragColor;
 
 void main() {
-    vec2 uv = (uSTMatrix * vec4(vUV, 0.0, 1.0)).xy;
+    // Flip in destination space *before* the ST/rotation mapping. Used only by the tracking
+    // pass so the CPU readback (glReadPixels is bottom-up) matches the displayed composite.
+    vec2 base = vec2(vUV.x, mix(vUV.y, 1.0 - vUV.y, uFlipV));
+    vec2 uv = (uSTMatrix * vec4(base, 0.0, 1.0)).xy;
     if (uRotation == 1) {
         uv = vec2(uv.y, 1.0 - uv.x);
     } else if (uRotation == 2) {

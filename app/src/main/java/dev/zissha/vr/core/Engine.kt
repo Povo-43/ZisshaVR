@@ -296,7 +296,6 @@ class Engine private constructor() {
         }
         glRenderer.setOutputSize(outW, outH)
         applyCameraTransform()
-        glRenderer.setCameraTransform(glRenderer.rotationQuarterTurns, glRenderer.mirror)
         cameraBound = true
         _uiState.value = _uiState.value.copy(previewSizeError = false)
         AppLog.i(
@@ -313,9 +312,7 @@ class Engine private constructor() {
         val bound = lastBound ?: return
         val autoTurns = (bound.sensorOrientation / 90) % 4
         val turns = currentSettings.cameraRotationOverride.takeIf { it in 0..3 } ?: autoTurns
-        glRenderer.rotationQuarterTurns = turns
-        glRenderer.mirror = bound.isFront != currentSettings.cameraMirrorInverted
-        glRenderer.setCameraTransform(turns, glRenderer.mirror)
+        glRenderer.setCameraTransform(turns, bound.isFront != currentSettings.cameraMirrorInverted)
     }
 
     private suspend fun restartCamera() {
