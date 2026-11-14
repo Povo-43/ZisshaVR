@@ -389,6 +389,9 @@ class AvatarRenderer {
         boneTexture = 0
         if (program != 0) GLES30.glDeleteProgram(program)
         program = 0
+        // Uniform locations belong to the program that was just deleted; the cache must be dropped
+        // or a reload (new program) would reuse stale locations and set the wrong uniforms.
+        uniformCache.clear()
         loaded = false
         morphWeights.clear()
         lastMorphKey = -1

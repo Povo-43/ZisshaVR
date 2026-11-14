@@ -179,8 +179,8 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit) {
 
             SectionCard(title = "トラッキング") {
                 ToggleRow(
-                    label = "人物セグメンテーション",
-                    description = "人物領域をアバターで置き換えます",
+                    label = "人物の形で切り抜く",
+                    description = "OFF: アバター全体を人物の位置・大きさに合わせて重ねます。ON: 人物のシルエットでアバターを切り抜き、人物を完全に隠します。",
                     checked = settings.segmentationEnabled,
                     onCheckedChange = { v -> update { it.copy(segmentationEnabled = v) } },
                 )

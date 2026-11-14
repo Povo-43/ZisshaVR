@@ -15,8 +15,9 @@ import dev.zissha.vr.tracking.PoseResult
  * - Limb bones are driven with direction-based FK: each segment's world rotation is the
  *   shortest-arc rotation from its rest direction to the landmark-derived direction.
  * - The head is driven by an orthonormal basis built from eye / mouth / ear landmarks.
- * - The root follows the person's hip position scaled by the shoulder-width ratio, with the
- *   feet clamped to the ground plane.
+ * - The root tracks the person's body: it is anchored on the tracked shoulder midpoint (the hips
+ *   are derived from it when they are off-screen) and scaled from the hip->shoulder torso length,
+ *   so the avatar moves with the person instead of being clipped to their silhouette.
  *
  * View space: x right, y up, z toward the viewer, and the tracking input is the *displayed*
  * (mirrored, selfie) image, so landmark y is "down on screen" exactly like the composite. The
@@ -42,12 +43,16 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
     private var restTorsoUp: Vec3? = null
     private var avatarShoulderWidth: Float = 0.3f
     private var avatarHipsToFeet: Float = 0.9f
+    /** Rest midpoint of the two shoulder joints (the anchor the avatar is aligned to). */
+    private var restShoulderMid: Vec3? = null
+    /** Rest length from the hip midpoint to the shoulder midpoint (like-for-like scale reference). */
+    private var restTorsoLength: Float = 0.3f
 
     // smoothed root state
     private var rootPos = Vec3(0f, 0f, 0f)
     private var rootScale = 1f
-    private var initialized = false
-    private var hasHadValidHips = false
+    private var posInitialized = false
+    private var scaleInitialized = false
 
     /**
      * World-space model transform derived from tracking. The renderer applies it after skinning
@@ -104,6 +109,15 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         val ls = restTranslation("leftShoulder")
         val rs = restTranslation("rightShoulder")
         if (ls != null && rs != null) avatarShoulderWidth = (ls - rs).length().coerceAtLeast(0.05f)
+        // Shoulder-joint midpoint: the person's shoulder landmarks (11/12) are joint centers too, so
+        // aligning joint-center to joint-center matches the person far better than aligning silhouettes.
+        restShoulderMid = if (ls != null && rs != null) {
+            (ls + rs) * 0.5f
+        } else {
+            val lu = restTranslation("leftUpperArm")
+            val ru = restTranslation("rightUpperArm")
+            if (lu != null && ru != null) (lu + ru) * 0.5f else null
+        }
         val hips = restTranslation("hips")
         val footL = restTranslation("leftFoot")
         val footR = restTranslation("rightFoot")
@@ -111,6 +125,9 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
             avatarHipsToFeet = hips.y - ((footL.y + footR.y) / 2f).coerceAtLeast(0.1f)
         }
         rig.boneNode("hips")?.let { restHip = rig.nodes[it].restWorld.extractTranslation() }
+        restShoulderMid?.let { mid ->
+            restTorsoLength = (mid - restHip).length().coerceAtLeast(0.05f)
+        }
     }
 
     /** The underlying rig; the renderer calls [rig.evaluate] after [applyPose]. */
@@ -149,94 +166,88 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
             return if (v.length() > 1e-5f) v.normalized() else null
         }
 
-        // ---------------- root placement: hips on the tracked hip, scale from shoulders --------
+        // ---------------- root placement: match the person's body, do not clip to it -------------
+        // The avatar is aligned joint-center to joint-center: position from the tracked shoulder
+        // midpoint (deriving the hips from it when they are off-screen) and scale from the
+        // hip->shoulder torso length, which is a like-for-like measurement between the two rigs.
         val shouldersOk = visible(11) && visible(12)
         val hipsOk = visible(23) && visible(24)
 
-        // Compute target hip position whenever hips are visible (more robust than requiring both)
-        var targetHip: Vec3? = null
-        if (hipsOk) {
-            val hipCx = (lm[23].x + lm[24].x) / 2f
-            val hipCy = (lm[23].y + lm[24].y) / 2f
-            targetHip = Vec3(
-                x = (hipCx - 0.5f) * viewWidth,
-                y = cameraHeight - (hipCy - 0.5f) * viewHeight,
-                z = 0f,
-            )
-        }
+        fun midWorld(a: Int, b: Int): Vec3 = Vec3(
+            x = ((lm[a].x + lm[b].x) * 0.5f - 0.5f) * viewWidth,
+            y = cameraHeight - ((lm[a].y + lm[b].y) * 0.5f - 0.5f) * viewHeight,
+            z = 0f,
+        )
 
-        // Compute target scale whenever shoulders are visible
+        // scale: torso length first (robust and like-for-like), shoulder width as fallback
         var targetScale: Float? = null
-        if (shouldersOk) {
+        if (shouldersOk && hipsOk && restTorsoLength > 1e-4f) {
+            val personTorso = (midWorld(11, 12) - midWorld(23, 24)).length()
+            if (personTorso > 1e-4f) {
+                targetScale = (personTorso / restTorsoLength).coerceIn(0.25f, 3.5f) * scaleMultiplier
+            }
+        }
+        if (targetScale == null && shouldersOk && avatarShoulderWidth > 1e-4f) {
             val sdx = (lm[11].x - lm[12].x) * viewWidth
             val sdy = (lm[11].y - lm[12].y) * viewHeight
             val personShoulderWorld = kotlin.math.hypot(sdx.toDouble(), sdy.toDouble()).toFloat()
-            targetScale = (personShoulderWorld / avatarShoulderWidth).coerceIn(0.3f, 2.5f) * scaleMultiplier
+            targetScale = (personShoulderWorld / avatarShoulderWidth).coerceIn(0.25f, 3.5f) * scaleMultiplier
         }
 
-        // Initialize on first valid data (hip position or scale), then smooth
-        if (!initialized && (targetHip != null || targetScale != null)) {
-            if (targetHip != null) rootPos = targetHip
-            if (targetScale != null) rootScale = targetScale
-            initialized = true
-        } else if (initialized) {
-            val k = (dt * 12f).coerceIn(0.05f, 1f)
-            if (targetHip != null) {
-                // If we just got valid hips for the first time (after fallback init), snap immediately
-                val firstHipFrame = !hasHadValidHips
-                if (firstHipFrame) hasHadValidHips = true
-                rootPos = if (firstHipFrame) targetHip else Vec3(
+        val k = (dt * 12f).coerceIn(0.05f, 1f)
+        if (targetScale != null) {
+            if (!scaleInitialized) {
+                rootScale = targetScale
+                scaleInitialized = true
+            } else {
+                rootScale += (targetScale - rootScale) * k
+            }
+        }
+
+        // position: prefer the observed hips, otherwise project the hips out of the shoulders
+        val shoulderMidWorld = if (shouldersOk) midWorld(11, 12) else null
+        val targetHip: Vec3? = when {
+            hipsOk -> midWorld(23, 24)
+            shoulderMidWorld != null && restShoulderMid != null ->
+                shoulderMidWorld - (restShoulderMid!! - restHip) * rootScale
+            else -> null
+        }
+        if (targetHip != null) {
+            if (!posInitialized) {
+                rootPos = targetHip
+                posInitialized = true
+            } else {
+                rootPos = Vec3(
                     rootPos.x + (targetHip.x - rootPos.x) * k,
                     rootPos.y + (targetHip.y - rootPos.y) * k,
                     0f,
                 )
             }
-            if (targetScale != null) {
-                rootScale += (targetScale - rootScale) * k
+        }
+        // Fallback so the avatar never sticks at a placeholder position: derive a hip estimate from
+        // the head landmarks (placed a fixed fraction of the torso below them).
+        if (!posInitialized) {
+            val headIdx = when {
+                visible(0) -> 0    // nose
+                visible(1) -> 1    // neck
+                else -> (0 until 33).firstOrNull { visible(it) } ?: -1
+            }
+            if (headIdx >= 0) {
+                val head = lm[headIdx]
+                val headWorld = Vec3(
+                    (head.x - 0.5f) * viewWidth,
+                    cameraHeight - (head.y - 0.5f) * viewHeight,
+                    0f,
+                )
+                // hips sit roughly 1.5 torso lengths below the head
+                rootPos = headWorld - Vec3(0f, restTorsoLength * rootScale * 1.5f, 0f)
+                posInitialized = true
             }
         }
-        // Aggressive fallback: if still not initialized, try any visible landmark as proxy
-        if (!initialized) {
-            // Try nose (0) -> approximate hip center from nose position
-            if (visible(0)) {
-                val nose = lm[0]
-                rootPos = Vec3(
-                    x = (nose.x - 0.5f) * viewWidth,
-                    y = cameraHeight - (nose.y - 0.3f) * viewHeight, // nose is above hips
-                    z = 0f,
-                )
-                rootScale = (1.0f / avatarShoulderWidth).coerceIn(0.5f, 2.0f) * scaleMultiplier
-                initialized = true
-            }
-            // Try neck (1) as secondary fallback
-            else if (visible(1)) {
-                val neck = lm[1]
-                rootPos = Vec3(
-                    x = (neck.x - 0.5f) * viewWidth,
-                    y = cameraHeight - (neck.y - 0.15f) * viewHeight,
-                    z = 0f,
-                )
-                rootScale = (1.0f / avatarShoulderWidth).coerceIn(0.5f, 2.0f) * scaleMultiplier
-                initialized = true
-            }
-            // Last resort: any visible landmark
-            else {
-                for (i in 0 until 33) {
-                    if (visible(i)) {
-                        val landmark = lm[i]
-                        rootPos = Vec3(
-                            x = (landmark.x - 0.5f) * viewWidth,
-                            y = cameraHeight - (landmark.y - 0.2f) * viewHeight,
-                            z = 0f,
-                        )
-                        rootScale = (1.0f / avatarShoulderWidth).coerceIn(0.5f, 2.0f) * scaleMultiplier
-                        initialized = true
-                        break
-                    }
-                }
-            }
+        if (!scaleInitialized && avatarShoulderWidth > 1e-4f) {
+            rootScale = (0.45f / avatarShoulderWidth).coerceIn(0.4f, 2f) * scaleMultiplier
+            scaleInitialized = true
         }
-
         // Scale about the rest hips, then translate so they land on the tracked hips.
         modelScale = rootScale
         modelOffset = Vec3(

@@ -24,7 +24,7 @@ data class Settings(
     val poseEnabled: Boolean = true,
     val faceEnabled: Boolean = true,
     val handEnabled: Boolean = true,
-    val segmentationEnabled: Boolean = true,
+    val segmentationEnabled: Boolean = false,
     /** Composite the MediaPipe pose skeleton onto the live output (alignment aid). */
     val skeletonOverlay: Boolean = true,
     /** Automatically return to LIVE from an auto-triggered FREEZE/PRIVACY once tracking recovers. */
@@ -56,7 +56,7 @@ class SettingsRepository(private val context: Context) {
         val poseEnabled = booleanPreferencesKey("pose_enabled")
         val faceEnabled = booleanPreferencesKey("face_enabled")
         val handEnabled = booleanPreferencesKey("hand_enabled")
-        val segmentationEnabled = booleanPreferencesKey("segmentation_enabled")
+        val segmentationEnabled = booleanPreferencesKey("person_cutout")
         val skeletonOverlay = booleanPreferencesKey("skeleton_overlay")
         val autoRecover = booleanPreferencesKey("auto_recover")
         val lodAuto = booleanPreferencesKey("lod_auto")
@@ -81,7 +81,7 @@ class SettingsRepository(private val context: Context) {
             poseEnabled = p[Keys.poseEnabled] ?: true,
             faceEnabled = p[Keys.faceEnabled] ?: true,
             handEnabled = p[Keys.handEnabled] ?: true,
-            segmentationEnabled = p[Keys.segmentationEnabled] ?: true,
+            segmentationEnabled = p[Keys.segmentationEnabled] ?: false,
             skeletonOverlay = p[Keys.skeletonOverlay] ?: true,
             autoRecover = p[Keys.autoRecover] ?: true,
             lodAuto = p[Keys.lodAuto] ?: true,
@@ -108,7 +108,7 @@ class SettingsRepository(private val context: Context) {
                 poseEnabled = p[Keys.poseEnabled] ?: true,
                 faceEnabled = p[Keys.faceEnabled] ?: true,
                 handEnabled = p[Keys.handEnabled] ?: true,
-                segmentationEnabled = p[Keys.segmentationEnabled] ?: true,
+                segmentationEnabled = p[Keys.segmentationEnabled] ?: false,
                 skeletonOverlay = p[Keys.skeletonOverlay] ?: true,
                 autoRecover = p[Keys.autoRecover] ?: true,
                 lodAuto = p[Keys.lodAuto] ?: true,
