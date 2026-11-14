@@ -151,36 +151,62 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         // ---------------- root placement: hips on the tracked hip, scale from shoulders --------
         val shouldersOk = visible(11) && visible(12)
         val hipsOk = visible(23) && visible(24)
-        if (shouldersOk && hipsOk) {
-            val sdx = (lm[11].x - lm[12].x) * viewWidth
-            val sdy = (lm[11].y - lm[12].y) * viewHeight
-            val personShoulderWorld = kotlin.math.hypot(sdx.toDouble(), sdy.toDouble()).toFloat()
+
+        // Compute target hip position whenever hips are visible (more robust than requiring both)
+        var targetHip: Vec3? = null
+        if (hipsOk) {
             val hipCx = (lm[23].x + lm[24].x) / 2f
             val hipCy = (lm[23].y + lm[24].y) / 2f
-            val targetScale =
-                (personShoulderWorld / avatarShoulderWidth).coerceIn(0.3f, 2.5f) * scaleMultiplier
-            // Image x and view x point the same way (the mirrored camera transform is already
-            // baked into the tracking input), so the root offset is never side-inverted. The rest
-            // yaw in HumanoidRig handles making the model face the viewer.
-            val targetHip = Vec3(
+            targetHip = Vec3(
                 x = (hipCx - 0.5f) * viewWidth,
                 y = cameraHeight - (hipCy - 0.5f) * viewHeight,
                 z = 0f,
             )
-            if (!initialized) {
-                rootPos = targetHip
-                rootScale = targetScale
-                initialized = true
-            } else {
-                val k = (dt * 12f).coerceIn(0.05f, 1f)
+        }
+
+        // Compute target scale whenever shoulders are visible
+        var targetScale: Float? = null
+        if (shouldersOk) {
+            val sdx = (lm[11].x - lm[12].x) * viewWidth
+            val sdy = (lm[11].y - lm[12].y) * viewHeight
+            val personShoulderWorld = kotlin.math.hypot(sdx.toDouble(), sdy.toDouble()).toFloat()
+            targetScale = (personShoulderWorld / avatarShoulderWidth).coerceIn(0.3f, 2.5f) * scaleMultiplier
+        }
+
+        // Initialize on first valid data (hip position or scale), then smooth
+        if (!initialized && (targetHip != null || targetScale != null)) {
+            if (targetHip != null) rootPos = targetHip
+            if (targetScale != null) rootScale = targetScale
+            initialized = true
+        } else if (initialized) {
+            val k = (dt * 12f).coerceIn(0.05f, 1f)
+            if (targetHip != null) {
                 rootPos = Vec3(
                     rootPos.x + (targetHip.x - rootPos.x) * k,
                     rootPos.y + (targetHip.y - rootPos.y) * k,
                     0f,
                 )
+            }
+            if (targetScale != null) {
                 rootScale += (targetScale - rootScale) * k
             }
         }
+        // If neither hips nor shoulders visible, hold last values (initialized stays true once set)
+        // Fallback: if still not initialized after some frames, use nose (0) or neck (1) as rough hip proxy
+        if (!initialized) {
+            // Try nose (0) -> approximate hip center from nose position
+            if (visible(0)) {
+                val nose = lm[0]
+                rootPos = Vec3(
+                    x = (nose.x - 0.5f) * viewWidth,
+                    y = cameraHeight - (nose.y - 0.3f) * viewHeight, // nose is above hips
+                    z = 0f,
+                )
+                rootScale = (1.0f / avatarShoulderWidth).coerceIn(0.5f, 2.0f) * scaleMultiplier
+                initialized = true
+            }
+        }
+
         // Scale about the rest hips, then translate so they land on the tracked hips.
         modelScale = rootScale
         modelOffset = Vec3(
