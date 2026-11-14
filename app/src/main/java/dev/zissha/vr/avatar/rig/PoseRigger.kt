@@ -47,6 +47,7 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
     private var rootPos = Vec3(0f, 0f, 0f)
     private var rootScale = 1f
     private var initialized = false
+    private var hasHadValidHips = false
 
     /**
      * World-space model transform derived from tracking. The renderer applies it after skinning
@@ -181,7 +182,10 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         } else if (initialized) {
             val k = (dt * 12f).coerceIn(0.05f, 1f)
             if (targetHip != null) {
-                rootPos = Vec3(
+                // If we just got valid hips for the first time (after fallback init), snap immediately
+                val firstHipFrame = !hasHadValidHips
+                if (firstHipFrame) hasHadValidHips = true
+                rootPos = if (firstHipFrame) targetHip else Vec3(
                     rootPos.x + (targetHip.x - rootPos.x) * k,
                     rootPos.y + (targetHip.y - rootPos.y) * k,
                     0f,
