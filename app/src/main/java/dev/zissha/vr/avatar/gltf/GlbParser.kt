@@ -475,8 +475,16 @@ object GlbParser {
                     val radius = c.obj("shape")?.obj("sphere")?.float("radius", 0.1f) ?: 0.1f
                     if (node >= 0) colliders.add(SpringCollider(node, radius))
                 }
+                // VRM 1.0 groups colliders; springs reference groups by index. Resolve them to the
+                // flat collider list so hair/cloth is pushed out instead of sinking into the head.
+                val colliderGroups = sb.array("colliderGroups")?.map { gel ->
+                    gel.jsonObject.array("colliders")?.intList() ?: emptyList()
+                } ?: emptyList()
                 sb.array("springs")?.forEach { el ->
                     val s = el.jsonObject
+                    val springColliders = s.array("colliderGroups")?.intList()
+                        ?.flatMap { gi -> colliderGroups.getOrNull(gi) ?: emptyList() }
+                        ?: emptyList()
                     val joints = s.array("joints")?.map { jel ->
                         val j = jel.jsonObject
                         SpringBoneJoint(
@@ -490,7 +498,7 @@ object GlbParser {
                             dragForce = j.float("dragForce", 0.4f),
                         )
                     }?.filter { it.nodeIndex >= 0 } ?: emptyList()
-                    if (joints.isNotEmpty()) springGroups.add(SpringBoneGroup(s.str("name"), joints, emptyList()))
+                    if (joints.isNotEmpty()) springGroups.add(SpringBoneGroup(s.str("name"), joints, springColliders))
                 }
             }
         }
@@ -546,6 +554,10 @@ object GlbParser {
             "fun" -> "relaxed"
             "blink_l" -> "blinkLeft"
             "blink_r" -> "blinkRight"
+            "lookup" -> "lookUp"
+            "lookdown" -> "lookDown"
+            "lookleft" -> "lookLeft"
+            "lookright" -> "lookRight"
             else -> name
         }
     }

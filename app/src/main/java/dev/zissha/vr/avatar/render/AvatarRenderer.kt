@@ -217,7 +217,14 @@ class AvatarRenderer {
         val vrm = doc.vrm ?: return
         morphWeights.clear()
         for (expr in vrm.expressions) {
-            val w = weights.values[expr.name] ?: continue
+            // VRM 0.x groups are named by the exporter (e.g. "A", "Blink"); the standardized preset
+            // lives in presetName. Match the preset first, then the raw name, case-insensitively.
+            val w = weights.values[expr.presetName ?: expr.name]
+                ?: weights.values[expr.name]
+                ?: weights.values.entries.firstOrNull {
+                    it.key.equals(expr.presetName ?: expr.name, ignoreCase = true)
+                }?.value
+                ?: continue
             if (w < 0.01f) continue
             for (bind in expr.binds) {
                 val meshIndex = bind.nodeIndex // VRM0: mesh index; VRM1: node index resolved below

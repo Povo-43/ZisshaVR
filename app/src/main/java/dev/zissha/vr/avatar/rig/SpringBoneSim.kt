@@ -43,7 +43,11 @@ class SpringBoneSim(
                     val d = to - from
                     if (d.length() > 1e-6f) {
                         state.boneLength = d.length().coerceAtLeast(0.01f)
-                        state.restDirLocal = d.normalized()
+                        // Store the direction in the bone's *local* space: update() feeds it through
+                        // the current world matrix, so keeping it in world space double-rotated the
+                        // rest direction and made hair/skirt swing the wrong way or explode.
+                        val restRot = rig.nodes[nodeIdx].restWorld.extractRotation()
+                        state.restDirLocal = restRot.conjugate().rotate(d.normalized())
                     }
                 }
             }

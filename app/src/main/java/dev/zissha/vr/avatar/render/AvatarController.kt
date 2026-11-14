@@ -24,7 +24,8 @@ class AvatarController(val renderer: AvatarRenderer) {
         /** world-space height visible at the root plane */
         val VIEW_HEIGHT = 2f * kotlin.math.tan(FOV_Y / 2f) * CAM_DIST
         private const val SPRING_DT = 1f / 60f
-        private const val MAX_SPRING_SUBSTEPS = 2
+        /** Enough substeps to keep hair/cloth in real time down to ~15 fps. */
+        private const val MAX_SPRING_SUBSTEPS = 4
     }
 
     var rig: HumanoidRig? = null

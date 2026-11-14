@@ -6,6 +6,8 @@ import dev.zissha.vr.math.Mat4
 import dev.zissha.vr.math.Quat
 import dev.zissha.vr.math.Vec3
 import dev.zissha.vr.tracking.HandSkeleton
+import dev.zissha.vr.tracking.OneEuroFilter
+import dev.zissha.vr.tracking.OneEuroFilter3
 import dev.zissha.vr.tracking.PoseResult
 
 /**
@@ -53,6 +55,12 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
     private var rootScale = 1f
     private var posInitialized = false
     private var scaleInitialized = false
+
+    // One Euro filtering removes the per-frame jitter of the tracked shoulder/hip midpoints while
+    // staying responsive during fast movement (the previous fixed lerp was either laggy or jittery).
+    private val rootPosFilter = OneEuroFilter3(minCutoff = 0.55f, beta = 0.02f)
+    private val rootScaleFilter = OneEuroFilter(minCutoff = 0.45f, beta = 0.01f)
+    private var filterTime = 0f
 
     /**
      * World-space model transform derived from tracking. The renderer applies it after skinning
@@ -194,13 +202,14 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
             targetScale = (personShoulderWorld / avatarShoulderWidth).coerceIn(0.25f, 3.5f) * scaleMultiplier
         }
 
-        val k = (dt * 12f).coerceIn(0.05f, 1f)
+        filterTime += dt.coerceIn(0f, 0.1f)
         if (targetScale != null) {
             if (!scaleInitialized) {
                 rootScale = targetScale
+                rootScaleFilter.filter(targetScale, filterTime)
                 scaleInitialized = true
             } else {
-                rootScale += (targetScale - rootScale) * k
+                rootScale = rootScaleFilter.filter(targetScale, filterTime)
             }
         }
 
@@ -215,13 +224,11 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         if (targetHip != null) {
             if (!posInitialized) {
                 rootPos = targetHip
+                rootPosFilter.filter(targetHip.x, targetHip.y, targetHip.z, filterTime)
                 posInitialized = true
             } else {
-                rootPos = Vec3(
-                    rootPos.x + (targetHip.x - rootPos.x) * k,
-                    rootPos.y + (targetHip.y - rootPos.y) * k,
-                    0f,
-                )
+                val f = rootPosFilter.filter(targetHip.x, targetHip.y, targetHip.z, filterTime)
+                rootPos = Vec3(f[0], f[1], 0f)
             }
         }
         // Fallback so the avatar never sticks at a placeholder position: derive a hip estimate from
@@ -337,38 +344,53 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         val side = if (hand.isLeftHand) "left" else "right"
         val wl = hand.worldLandmarks
         val conv = rig.viewToAvatar
-        fun toWorldVec(l: dev.zissha.vr.tracking.Landmark3): Vec3 = conv.rotate(Vec3(l.x, -l.y, l.z * Z_SIGN))
+        fun lmVec(i: Int): Vec3 =
+            conv.rotate(Vec3(wl[i].x, -wl[i].y, wl[i].z * Z_SIGN))
 
-        // hand bone orientation: wrist -> middle MCP direction blended with thumb direction
+        // Hand bone: align the wrist -> middle-MCP axis with the tracked hand. The rest direction
+        // must come from the rig itself: assuming a fixed +Y rest rotated the hand ~90 degrees,
+        // which is what made the palm/fingers push into the body.
         rig.boneNode("${side}Hand")?.let { handNode ->
-            val desired = (toWorldVec(wl[9]) - toWorldVec(wl[0])).normalized()
-            val restWorldRot = rig.nodes[handNode].restWorld.extractRotation()
-            // hands rest along +Y (fingers continue the arm); use lower-arm continuation as rest
-            rig.worldRotationOverride[handNode] = Quat.fromToRotation(Vec3(0f, 1f, 0f), desired) * restWorldRot
+            val midProximal = rig.boneNode("${side}MiddleProximal")
+            if (midProximal != null) {
+                val desired = (lmVec(9) - lmVec(0)).normalized()
+                if (desired.length() > 1e-5f) {
+                    val rest = rig.restDirection(handNode, midProximal)
+                    val restWorldRot = rig.nodes[handNode].restWorld.extractRotation()
+                    rig.worldRotationOverride[handNode] =
+                        Quat.fromToRotation(rest, desired) * restWorldRot
+                }
+            }
         }
-        driveFinger(side, "Thumb", intArrayOf(1, 2, 3, 4), wl, ::toWorldVec)
-        driveFinger(side, "Index", intArrayOf(5, 6, 7, 8), wl, ::toWorldVec)
-        driveFinger(side, "Middle", intArrayOf(9, 10, 11, 12), wl, ::toWorldVec)
-        driveFinger(side, "Ring", intArrayOf(13, 14, 15, 16), wl, ::toWorldVec)
-        driveFinger(side, "Little", intArrayOf(17, 18, 19, 20), wl, ::toWorldVec)
+        driveFinger(side, "Thumb", intArrayOf(1, 2, 3, 4)) { lmVec(it) }
+        driveFinger(side, "Index", intArrayOf(5, 6, 7, 8)) { lmVec(it) }
+        driveFinger(side, "Middle", intArrayOf(9, 10, 11, 12)) { lmVec(it) }
+        driveFinger(side, "Ring", intArrayOf(13, 14, 15, 16)) { lmVec(it) }
+        driveFinger(side, "Little", intArrayOf(17, 18, 19, 20)) { lmVec(it) }
     }
 
     private fun driveFinger(
         side: String,
         finger: String,
         lm: IntArray,
-        wl: List<dev.zissha.vr.tracking.Landmark3>,
-        toWorldVec: (dev.zissha.vr.tracking.Landmark3) -> Vec3,
+        lmVec: (Int) -> Vec3,
     ) {
         val segments = arrayOf("Proximal", "Intermediate", "Distal")
         for (s in 0 until 3) {
             val bone = rig.boneNode("${side}${finger}${segments[s]}") ?: continue
-            val from = wl[lm[s]]
-            val to = wl[lm[s + 1]]
-            val desired = (toWorldVec(to) - toWorldVec(from)).normalized()
+            val desired = (lmVec(lm[s + 1]) - lmVec(lm[s])).normalized()
             if (desired.length() < 1e-5f) continue
+            // Use the segment's own rest direction (proximal->intermediate, intermediate->distal,
+            // proximal->distal for the last segment) instead of an assumed +Y.
+            val nextBone = rig.boneNode("${side}${finger}${segments.getOrNull(s + 1) ?: ""}")
+            val rootBone = rig.boneNode("${side}${finger}${segments[0]}")
+            val rest = when {
+                nextBone != null && nextBone != bone -> rig.restDirection(bone, nextBone)
+                rootBone != null && rootBone != bone -> rig.restDirection(rootBone, bone)
+                else -> continue
+            }
             val restWorldRot = rig.nodes[bone].restWorld.extractRotation()
-            rig.worldRotationOverride[bone] = Quat.fromToRotation(Vec3(0f, 1f, 0f), desired) * restWorldRot
+            rig.worldRotationOverride[bone] = Quat.fromToRotation(rest, desired) * restWorldRot
         }
     }
 
