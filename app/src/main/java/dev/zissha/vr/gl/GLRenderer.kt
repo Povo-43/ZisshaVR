@@ -57,6 +57,9 @@ class GLRenderer(
     private var encoderEglSurface: EGLSurface? = null
     private var encoderSurface: Surface? = null
 
+    /** Encoder surface texture that arrived before the GL context existed. */
+    private var pendingEncoderSurfaceTexture: SurfaceTexture? = null
+
     private var compositor: Compositor? = null
     private val compositorRef = AtomicReference<Compositor?>(null)
 
@@ -174,16 +177,26 @@ class GLRenderer(
             releaseEncoderSurface()
             val st = surfaceTexture
             if (st != null) {
-                val surface = Surface(st)
-                encoderSurface = surface
-                try {
-                    encoderEglSurface = egl?.createWindowSurface(surface)
-                } catch (e: Exception) {
-                    Log.e(TAG, "encoder surface create failed", e)
-                    encoderSurface = null
+                if (egl == null) {
+                    // GL not initialized yet: apply after initializeGl instead of dropping it.
+                    pendingEncoderSurfaceTexture = st
+                } else {
+                    createEncoderEglSurface(st)
                 }
             }
         }
+    }
+
+    private fun createEncoderEglSurface(st: SurfaceTexture) {
+        val surface = Surface(st)
+        encoderSurface = surface
+        try {
+            encoderEglSurface = egl?.createWindowSurface(surface)
+        } catch (e: Exception) {
+            Log.e(TAG, "encoder surface create failed", e)
+            encoderSurface = null
+        }
+        if (encoderEglSurface == null) Log.w(TAG, "encoder EGL surface unavailable; no video output")
     }
 
     fun setPrivacyImage(bitmap: android.graphics.Bitmap?) {
@@ -245,6 +258,10 @@ class GLRenderer(
                 previewSurface = s
                 createPreviewEglSurface(s)
             }
+        }
+        pendingEncoderSurfaceTexture?.let { st ->
+            pendingEncoderSurfaceTexture = null
+            createEncoderEglSurface(st)
         }
 
         onCameraSurfaceCreated?.invoke(st)

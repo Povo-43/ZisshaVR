@@ -15,8 +15,8 @@ android {
         applicationId = "dev.zissha.vr"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.1.16"
+        versionCode = 12
+        versionName = "0.1.17"
         vectorDrawables { useSupportLibrary = true }
     }
 

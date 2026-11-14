@@ -114,6 +114,10 @@ class Engine private constructor() {
 
     private lateinit var appContext: Context
 
+    /** Actual composite size (portrait) of the bound camera, used for record / stream encoders. */
+    private var boundOutputWidth = 720
+    private var boundOutputHeight = 1280
+
     private var lastFrameUptimeMs = 0L
     private var renderFps = 0f
     private var frameCounter = 0L
@@ -294,6 +298,8 @@ class Engine private constructor() {
             outW = bound.bufferWidth
             outH = bound.bufferHeight
         }
+        boundOutputWidth = outW
+        boundOutputHeight = outH
         glRenderer.setOutputSize(outW, outH)
         applyCameraTransform()
         cameraBound = true
@@ -494,7 +500,9 @@ class Engine private constructor() {
     fun startRecording(): Boolean {
         if (_uiState.value.recording) return true
         val settings = currentSettings
-        val (w, h) = if (settings.resolutionIndex == 0) 720 to 1280 else 1080 to 1920
+        // Use the composite size that is actually produced instead of a hard-coded resolution.
+        val w = boundOutputWidth
+        val h = boundOutputHeight
         val file = recordingManager.newRecordingFile()
         val ok = rtmpSession.startRecording(
             path = file.absolutePath,
@@ -510,9 +518,14 @@ class Engine private constructor() {
             }
             _uiState.value = _uiState.value.copy(recording = recordingActive, lastError = error)
         }
+        val reason = rtmpSession.lastError
         _uiState.value = _uiState.value.copy(
             recording = ok || _uiState.value.recording,
-            lastError = if (ok) null else "録画を開始できませんでした(保存先とコーデック設定を確認してください)",
+            lastError = if (ok) {
+                null
+            } else {
+                "録画を開始できませんでした: ${reason ?: "原因不明"} (${w}x$h)"
+            },
         )
         return ok
     }
@@ -525,7 +538,8 @@ class Engine private constructor() {
 
     fun startStreaming(): Boolean {
         val settings = currentSettings
-        val (w, h) = if (settings.resolutionIndex == 0) 720 to 1280 else 1080 to 1920
+        val w = boundOutputWidth
+        val h = boundOutputHeight
         val ok = rtmpSession.startStream(
             baseUrl = settings.rtmpUrl,
             streamKey = settings.streamKey,
@@ -538,11 +552,12 @@ class Engine private constructor() {
         if (ok) {
             _uiState.value = _uiState.value.copy(streamState = StreamState.CONNECTING, lastError = null)
         } else {
+            val reason = rtmpSession.lastError
             _uiState.value = _uiState.value.copy(
                 lastError = if (settings.rtmpUrl.isBlank()) {
                     "RTMP URLが未設定です(設定画面で入力してください)"
                 } else {
-                    "配信を開始できませんでした(RTMP設定とネットワークを確認してください)"
+                    "配信を開始できませんでした: ${reason ?: "RTMP設定とネットワークを確認してください"}"
                 },
             )
         }

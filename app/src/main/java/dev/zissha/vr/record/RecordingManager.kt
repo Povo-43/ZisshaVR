@@ -20,9 +20,19 @@ class RecordingManager(private val context: Context) {
 
     data class Recording(val file: File, val sizeBytes: Long, val lastModified: Long)
 
-    fun recordingDir(): File =
-        File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir, "recordings")
-            .apply { mkdirs() }
+    /**
+     * Directory for recordings. Prefers app-external storage (visible to other apps / MediaStore)
+     * and falls back to internal storage when external storage is missing or not writable, so that
+     * MediaMuxer can always open its output file.
+     */
+    fun recordingDir(): File {
+        val external = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+        val externalDir = external?.let { File(it, "recordings") }
+        if (externalDir != null && (externalDir.exists() || externalDir.mkdirs()) && externalDir.canWrite()) {
+            return externalDir
+        }
+        return File(context.filesDir, "recordings").apply { mkdirs() }
+    }
 
     fun newRecordingFile(): File {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())

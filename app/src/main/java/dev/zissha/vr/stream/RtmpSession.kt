@@ -55,6 +55,12 @@ class RtmpSession(private val context: Context) : ConnectChecker {
     var stream: RtmpStream? = null
         private set
 
+    /** Human readable reason for the last failed start (shown in the UI). */
+    @Volatile var lastError: String? = null
+        private set
+
+    private var surfaceJob: Job? = null
+
     private val autoRetry = AtomicBoolean(true)
     private var retryCount = 0
     private var retryJob: Job? = null
@@ -112,13 +118,15 @@ class RtmpSession(private val context: Context) : ConnectChecker {
                 if (!audioInSession) AppLog.w("prepareAudio failed; continuing video-only")
             }
             stream = newStream
-            encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(newStream.getSurfaceTexture())
             _state.value = StreamState.CONNECTING
             newStream.startStream(fullUrl)
+            // startStream() starts the renderer, which creates its SurfaceTexture asynchronously.
+            attachEncoderSurfaceWhenReady(newStream)
             AppLog.i("RTMP stream starting to ${sanitizeUrl(baseUrl)} (key withheld, ${width}x$height@$fps ${bitrateKbps}kbps audio=$audioEnabled)")
             true
         } catch (e: Exception) {
             Log.e(TAG, "startStream failed", e)
+            lastError = "配信開始に失敗しました: ${e.javaClass.simpleName}: ${e.message}"
             AppLog.e("RTMP start failed: ${e.message}")
             _state.value = StreamState.FAILED
             release()
@@ -137,6 +145,7 @@ class RtmpSession(private val context: Context) : ConnectChecker {
         audioEnabled: Boolean,
         onStatus: (Boolean, String?) -> Unit,
     ): Boolean {
+        lastError = null
         val target = stream?.takeIf { it.isStreaming } ?: run {
             // Record-only session: start from a clean, prepared session (a stale stream that is
             // not streaming would make startRecord fail silently).
@@ -144,15 +153,17 @@ class RtmpSession(private val context: Context) : ConnectChecker {
             if (!createSession(width, height, fps, bitrateKbps, audioEnabled)) return false
             stream!!
         }
+        // With NoVideoSource the library defaults to AUDIO-only tracks, which silently drops all
+        // video. Select the tracks explicitly so the composited video is written.
+        val tracks = if (audioInSession) {
+            RecordController.RecordTracks.ALL
+        } else {
+            RecordController.RecordTracks.VIDEO
+        }
         return try {
-            encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(target.getSurfaceTexture())
-            // With NoVideoSource the library defaults to AUDIO-only tracks, which silently drops
-            // all video. Select the tracks explicitly so the composited video is written.
-            val tracks = if (audioInSession) {
-                RecordController.RecordTracks.ALL
-            } else {
-                RecordController.RecordTracks.VIDEO
-            }
+            // Start first, then attach the encoder surface: the library creates its SurfaceTexture
+            // asynchronously in glInterface.start(), which startRecord() triggers. Reading it before
+            // this point returned null, so nothing was ever rendered into the encoder.
             target.startRecord(path, tracks) { status ->
                 when (status) {
                     com.pedro.library.base.recording.RecordController.Status.RECORDING,
@@ -165,12 +176,35 @@ class RtmpSession(private val context: Context) : ConnectChecker {
                 }
             }
             recording = true
+            attachEncoderSurfaceWhenReady(target)
             AppLog.i("recording started (tracks=$tracks): $path")
             true
         } catch (e: Exception) {
             Log.e(TAG, "startRecord failed", e)
+            lastError = "録画開始に失敗しました: ${e.javaClass.simpleName}: ${e.message}"
             AppLog.e("recording start failed: ${e.message}")
+            recording = false
             false
+        }
+    }
+
+    /**
+     * Hand the encoder SurfaceTexture to the GL renderer once the library has created it
+     * (it is built on the library's GL thread shortly after startRecord/startStream).
+     */
+    private fun attachEncoderSurfaceWhenReady(target: RtmpStream) {
+        surfaceJob?.cancel()
+        surfaceJob = scope.launch {
+            repeat(60) {
+                if (stream !== target) return@launch
+                val st = runCatching { target.getSurfaceTexture() }.getOrNull()
+                if (st != null) {
+                    encoderSurfaceListener?.onEncoderSurfaceTextureAvailable(st)
+                    return@launch
+                }
+                delay(50)
+            }
+            AppLog.w("encoder SurfaceTexture was never created; output may have no video")
         }
     }
 
@@ -191,6 +225,11 @@ class RtmpSession(private val context: Context) : ConnectChecker {
         }
     }
 
+    /**
+     * Create a prepared session, trying a few encoder configurations because some devices reject
+     * the portrait resolution (or the requested fps) for hardware H.264 encoders. Records a
+     * human-readable reason in [lastError] when every candidate fails.
+     */
     private fun createSession(
         width: Int,
         height: Int,
@@ -198,28 +237,54 @@ class RtmpSession(private val context: Context) : ConnectChecker {
         bitrateKbps: Int,
         audioEnabled: Boolean,
     ): Boolean {
-        return try {
-            val audioOk = audioEnabled && hasAudioPermission()
-            if (audioEnabled && !audioOk) {
-                AppLog.w("RECORD_AUDIO permission missing; session continues video-only")
+        val audioOk = audioEnabled && hasAudioPermission()
+        if (audioEnabled && !audioOk) {
+            AppLog.w("RECORD_AUDIO permission missing; session continues video-only")
+        }
+        val candidates = listOf(
+            Triple(width, height, 0),
+            Triple(height, width, 90),
+            Triple(720, 1280, 0),
+            Triple(1280, 720, 90),
+        ).distinct()
+        var reason: String? = null
+        for ((w, h, rot) in candidates) {
+            val newStream = try {
+                RtmpStream(
+                    context, this, NoVideoSource(),
+                    if (audioOk) MicrophoneSource() else NoAudioSource(),
+                )
+            } catch (e: Exception) {
+                reason = "セッション作成失敗: ${e.message}"
+                continue
             }
-            val newStream = RtmpStream(
-                context, this, NoVideoSource(),
-                if (audioOk) MicrophoneSource() else NoAudioSource(),
-            )
-            if (!newStream.prepareVideo(width, height, bitrateKbps * 1000, fps, 2, 0)) return false
+            val prepared = try {
+                newStream.prepareVideo(w, h, bitrateKbps * 1000, fps, 2, rot)
+            } catch (e: Exception) {
+                reason = "prepareVideo ${w}x$h rotation=$rot: ${e.javaClass.simpleName}: ${e.message}"
+                runCatching { newStream.release() }
+                continue
+            }
+            if (!prepared) {
+                reason = "この端末のH.264エンコーダは ${w}x$h (fps=$fps) に対応していません"
+                runCatching { newStream.release() }
+                continue
+            }
             audioInSession = false
             if (audioOk) {
                 audioInSession = runCatching {
                     newStream.prepareAudio(44100, true, 128 * 1000, false, false)
                 }.getOrDefault(false)
+                if (!audioInSession) AppLog.w("prepareAudio failed; continuing video-only")
             }
             stream = newStream
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "record session create failed", e)
-            false
+            lastError = null
+            AppLog.i("session prepared: ${w}x$h rotation=$rot fps=$fps audio=$audioInSession")
+            return true
         }
+        lastError = reason ?: "エンコーダを初期化できませんでした"
+        AppLog.e("record session create failed: $lastError")
+        return false
     }
 
     private fun hasAudioPermission(): Boolean =
