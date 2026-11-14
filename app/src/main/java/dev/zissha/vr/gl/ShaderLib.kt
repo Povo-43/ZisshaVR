@@ -204,8 +204,8 @@ void main() {
     // ----------------------------------------------------------------- final composite
     /**
      * Draws the already-rendered background (in the FBO) and overlays the avatar layer only
-     * inside the person mask. Output is straight-alpha; the caller uses premultiplied
-     * blending (ONE, ONE_MINUS_SRC_ALPHA) because the avatar FBO content is premultiplied.
+     * inside the person mask. The avatar layer is premultiplied alpha (RGB * A); the caller
+     * uses premultiplied blending (ONE, ONE_MINUS_SRC_ALPHA). The mask scales both RGB and A.
      */
     const val MASKED_OVER_FS = """#version 300 es
 precision mediump float;
@@ -218,7 +218,7 @@ void main() {
     vec4 av = texture(uAvatar, vUV);
     float m = mix(1.0, texture(uMask, vUV).r, uMaskEnabled);
     m = smoothstep(0.35, 0.65, m);
-    fragColor = vec4(av.rgb, av.a * m);
+    fragColor = vec4(av.rgb * m, av.a * m);
 }
 """
 }
