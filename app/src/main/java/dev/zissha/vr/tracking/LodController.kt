@@ -21,11 +21,13 @@ class LodController(
 
     var handsEnabled: Boolean = false
         private set
-    var faceEnabled: Boolean = false
+    var faceEnabled: Boolean = true  // enabled by default
         private set
     /** run pose inference every Nth camera frame */
     var poseStride: Int = 1
         private set
+
+    init { applyConfig() }
 
     private var lastChangeMs = 0L
 

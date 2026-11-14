@@ -191,8 +191,7 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
                 rootScale += (targetScale - rootScale) * k
             }
         }
-        // If neither hips nor shoulders visible, hold last values (initialized stays true once set)
-        // Fallback: if still not initialized after some frames, use nose (0) or neck (1) as rough hip proxy
+        // Aggressive fallback: if still not initialized, try any visible landmark as proxy
         if (!initialized) {
             // Try nose (0) -> approximate hip center from nose position
             if (visible(0)) {
@@ -204,6 +203,33 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
                 )
                 rootScale = (1.0f / avatarShoulderWidth).coerceIn(0.5f, 2.0f) * scaleMultiplier
                 initialized = true
+            }
+            // Try neck (1) as secondary fallback
+            else if (visible(1)) {
+                val neck = lm[1]
+                rootPos = Vec3(
+                    x = (neck.x - 0.5f) * viewWidth,
+                    y = cameraHeight - (neck.y - 0.15f) * viewHeight,
+                    z = 0f,
+                )
+                rootScale = (1.0f / avatarShoulderWidth).coerceIn(0.5f, 2.0f) * scaleMultiplier
+                initialized = true
+            }
+            // Last resort: any visible landmark
+            else {
+                for (i in 0 until 33) {
+                    if (visible(i)) {
+                        val landmark = lm[i]
+                        rootPos = Vec3(
+                            x = (landmark.x - 0.5f) * viewWidth,
+                            y = cameraHeight - (landmark.y - 0.2f) * viewHeight,
+                            z = 0f,
+                        )
+                        rootScale = (1.0f / avatarShoulderWidth).coerceIn(0.5f, 2.0f) * scaleMultiplier
+                        initialized = true
+                        break
+                    }
+                }
             }
         }
 

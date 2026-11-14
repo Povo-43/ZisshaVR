@@ -151,6 +151,7 @@ void main() {
     /**
      * Simplified MToon-style shading: lambert diffuse + rim light + base color texture.
      * Alpha modes: 0 opaque, 1 alpha-cutoff, 2 blend.
+     * Output is premultiplied alpha (RGB already multiplied by alpha) for correct compositing.
      */
     const val AVATAR_FS = """#version 300 es
 precision mediump float;
@@ -183,7 +184,7 @@ void main() {
     vec3 viewDir = normalize(vec3(0.0, 0.4, 1.0));
     float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.5) * 0.18;
     vec3 color = base.rgb * shade + rim * base.rgb;
-    fragColor = vec4(color, alpha);
+    fragColor = vec4(color * alpha, alpha);
 }
 """
 
