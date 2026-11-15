@@ -62,6 +62,9 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
     private val rootScaleFilter = OneEuroFilter(minCutoff = 0.45f, beta = 0.01f)
     private var filterTime = 0f
 
+    /** Frames since the last face head-pose sample; the landmark basis is only a fallback after this. */
+    private var framesSinceFace = Int.MAX_VALUE
+
     /**
      * World-space model transform derived from tracking. The renderer applies it after skinning
      * (`world = skinned * modelScale + modelOffset`), which scales the avatar about its hips and
@@ -302,7 +305,10 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
         driveBone("rightFoot", segmentDir(28, 32), Vec3(0f, -1f, 0f))
 
         // ---------------- head ----------------
-        if (visible(2) && visible(5) && visible(9) && visible(10)) {
+        // Only use the eye/mouth basis when the face landmarker has been unavailable for a while:
+        // it cannot express pitch, so switching between the two sources every frame would make the
+        // head jump. When face data flows, applyFace() owns the head.
+        if (framesSinceFace > 20 && visible(2) && visible(5) && visible(9) && visible(10)) {
             // Use right_eye - left_eye for the avatar's right vector.
             // In the mirrored selfie view: left eye (idx 2) is on image right, right eye (idx 5) on image left.
             // right_eye - left_eye points to the person's anatomical right (image left = -X),
@@ -328,6 +334,26 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
                 rig.boneNode("head")?.let { rig.worldRotationOverride[it] = headQuat }
             }
         }
+    }
+
+    /**
+     * Drive the neck/head from the face landmarker's head pose. This is the only source that can
+     * express pitch (nodding up/down) and roll; the eye/mouth landmark basis in [applyPose] cannot,
+     * which is why the head previously never moved vertically.
+     *
+     * The rotation is already in view space (identity when facing the camera), so it can be used as
+     * the absolute world rotation of the head bone; the neck follows with a fraction of it.
+     */
+    fun applyFace(headRotation: Quat?) {
+        if (headRotation == null) {
+            if (framesSinceFace < Int.MAX_VALUE) framesSinceFace++
+            return
+        }
+        framesSinceFace = 0
+        val neck = rig.boneNode("neck")
+        val head = rig.boneNode("head")
+        if (neck != null) rig.worldRotationOverride[neck] = Quat.IDENTITY.slerp(headRotation, 0.35f)
+        if (head != null) rig.worldRotationOverride[head] = headRotation
     }
 
     private fun driveBone(boneName: String, desired: Vec3?, restDir: Vec3?) {

@@ -107,14 +107,16 @@ class Stabilizer(
             smoothed[name] = s
         }
         var headOut = face.headMatrix
+        var headRot: Quat? = null
         if (face.headMatrix != null) {
-            val target = quatFromRowMajorMatrix(face.headMatrix)
+            val target = quatFromColumnMajorMatrix(face.headMatrix)
             headQuat = if (headQuat == null) target else headQuat!!.slerp(target, 0.4f).normalized()
+            headRot = headQuat
             val m = FloatArray(16)
             headQuat!!.toMat4(m)
             headOut = m
         }
-        return FaceResult(face.tsMs, smoothed, headOut)
+        return FaceResult(face.tsMs, smoothed, headOut, headRot)
     }
 
     fun reset() {
@@ -135,15 +137,15 @@ class Stabilizer(
         }
 
         /**
-         * Build a quaternion from a 4x4 row-major matrix (MediaPipe facial transformation matrix
-         * is documented as row-major).
+         * Build a quaternion from MediaPipe's facial transformation matrix.
+         *
+         * MediaPipe serialises it as `MatrixData` with the default `COLUMN_MAJOR` layout, which is
+         * the same order as [dev.zissha.vr.math.Mat4], so the 16 floats are copied straight in.
+         * (Treating them as row-major transposed the matrix and returned the inverse rotation.)
          */
-        fun quatFromRowMajorMatrix(m: FloatArray): Quat {
-            // convert to column-major Mat4
-            val col = FloatArray(16)
-            for (r in 0..3) for (c in 0..3) col[c * 4 + r] = m[r * 4 + c]
+        fun quatFromColumnMajorMatrix(m: FloatArray): Quat {
             val mat = dev.zissha.vr.math.Mat4()
-            System.arraycopy(col, 0, mat.m, 0, 16)
+            System.arraycopy(m, 0, mat.m, 0, minOf(16, m.size))
             return mat.extractRotation()
         }
     }

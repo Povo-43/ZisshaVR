@@ -358,8 +358,11 @@ class TrackingEngine(private val context: Context) {
                         val lm = result.landmarks()[i]
                         val world = result.worldLandmarks()[i]
                         val label = result.handedness().getOrNull(i)?.firstOrNull()?.categoryName() ?: "Right"
-                        // We feed the mirrored (selfie-view) frame, so handedness labels are swapped.
-                        val isLeft = label.equals("Right", ignoreCase = true)
+                        // MediaPipe labels the hand as it appears in the (mirrored) image, exactly
+                        // like the pose landmarks: "Left" is the hand on the right half of the
+                        // image. The pose mapping uses labels as-is, so the hand mapping must too,
+                        // otherwise the wrong hand's landmarks drive each hand bone.
+                        val isLeft = label.equals("Left", ignoreCase = true)
                         val list = lm.map { Landmark3(it.x(), it.y(), it.z(), it.visibility().orElse(1f)) }
                         val worldList = world.map { Landmark3(it.x(), it.y(), it.z(), it.visibility().orElse(1f)) }
                         skeletons.add(HandSkeleton(isLeft, list, worldList))

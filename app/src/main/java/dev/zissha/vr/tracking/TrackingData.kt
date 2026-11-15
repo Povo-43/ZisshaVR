@@ -31,8 +31,14 @@ class FaceResult(
     val tsMs: Long,
     /** category name -> score */
     val blendshapes: Map<String, Float>,
-    /** 4x4 head transformation matrix (row-major as delivered by MediaPipe), null when unavailable */
+    /** 4x4 head transformation matrix (column-major, MediaPipe MatrixData order), null if unavailable */
     val headMatrix: FloatArray?,
+    /**
+     * Head rotation in view space (x right, y up, z toward the viewer) with the same convention as
+     * the avatar, i.e. identity when the person faces the camera. This is what carries head pitch
+     * (nodding), which the 2D eye/mouth landmarks cannot express.
+     */
+    val headRotation: dev.zissha.vr.math.Quat? = null,
 ) {
     fun score(name: String): Float = blendshapes[name] ?: 0f
 }

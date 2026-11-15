@@ -104,6 +104,13 @@ class AvatarController(val renderer: AvatarRenderer) {
                 for (hand in hands.hands) rigger.applyHand(hand)
             }
         }
+        // Face pose carries head pitch/roll (the pose landmarks cannot), so apply it before the
+        // first rig.evaluate() of this frame.
+        tracking?.face?.let { face ->
+            rigger.applyFace(face.headRotation)
+            ExpressionMapper.map(face, exprWeights)
+            renderer.setExpressionWeights(exprWeights)
+        }
         rig.evaluate()
 
         if (springEnabled) {
@@ -121,10 +128,6 @@ class AvatarController(val renderer: AvatarRenderer) {
             }
         }
 
-        tracking?.face?.let { face ->
-            ExpressionMapper.map(face, exprWeights)
-            renderer.setExpressionWeights(exprWeights)
-        }
     }
 
     /**

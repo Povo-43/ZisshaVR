@@ -83,7 +83,9 @@ class LodController(
             }
             1 -> {
                 faceEnabled = true
-                handsEnabled = false
+                // Hands are enabled from LOD 1: finger tracking is a headline feature and the
+                // inference is cheap, while only enabling it at LOD 2 left fingers frozen.
+                handsEnabled = true
                 poseStride = 1
             }
             else -> {
