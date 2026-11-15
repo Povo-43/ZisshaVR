@@ -191,15 +191,25 @@ private fun EmptyRecordings(modifier: Modifier = Modifier) {
 }
 
 private fun shareRecording(context: android.content.Context, rec: RecordingManager.Recording) {
-    val uri = androidx.core.content.FileProvider.getUriForFile(
-        context,
-        context.packageName + ".fileprovider",
-        rec.file,
-    )
-    val share = Intent(Intent.ACTION_SEND).apply {
-        type = "video/mp4"
-        putExtra(Intent.EXTRA_STREAM, uri)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            context.packageName + ".fileprovider",
+            rec.file,
+        )
+        val share = Intent(Intent.ACTION_SEND).apply {
+            type = "video/mp4"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(share, "録画を共有"))
+    } catch (e: Exception) {
+        // Never crash the UI on a share failure; surface it instead.
+        android.util.Log.e("RecordingsScreen", "share failed", e)
+        android.widget.Toast.makeText(
+            context,
+            "共有できませんでした: ${e.javaClass.simpleName}",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
     }
-    context.startActivity(Intent.createChooser(share, "録画を共有"))
 }
