@@ -51,6 +51,8 @@ class TrackingEngine(private val context: Context) {
         private const val CONFIDENCE_GATE = 0.25f
         private const val WARP_SPEED = 1.8f // normalized units per second
         private const val STALE_MS = 350L
+        /** Re-use the last detected pose for this long when a frame misses the person. */
+        private const val POSE_HOLD_MS = 400L
     }
 
     private val thread = HandlerThread("ZisshaTracking").apply { start() }
@@ -65,6 +67,8 @@ class TrackingEngine(private val context: Context) {
     private var segmenter: ImageSegmenter? = null
 
     private var frameBitmap: Bitmap? = null
+    /** Last genuinely detected pose, kept briefly so single missed frames do not freeze the avatar. */
+    private var lastGoodPose: PoseResult? = null
     private var lastTsMs = -1L
     private var poseFailureStreak = 0
     private var poseCpuFallbackDone = false
@@ -126,6 +130,7 @@ class TrackingEngine(private val context: Context) {
     fun resetTracking() {
         handler.post {
             stabilizer.reset()
+            lastGoodPose = null
             synchronized(historyLock) { history.clear() }
             _latest.value = null
             lastHipCenter[0] = Float.NaN
@@ -289,6 +294,8 @@ class TrackingEngine(private val context: Context) {
 
         val governorStride = if (thermalLevel >= 3) 2 else 1
         val poseStride = (lod.poseStride * governorStride).coerceAtLeast(1)
+        // True when this frame produced a real detection (as opposed to a held/previous pose).
+        var poseDetected = false
 
         if (poseLandmarker != null && framesProcessed % poseStride == 0L) {
             try {
@@ -305,6 +312,11 @@ class TrackingEngine(private val context: Context) {
                 } else {
                     poseFailureStreak++
                 }
+                poseDetected = pose != null
+                // Remember the last real detection (never a carried-forward copy).
+                if (poseDetected) {
+                    pose?.let { lastGoodPose = PoseResult(frame.tsMs, it.landmarks, it.worldLandmarks) }
+                }
             } catch (e: Exception) {
                 poseFailureStreak++
                 if (poseFailureStreak == 1) Log.w(TAG, "pose inference failed", e)
@@ -319,6 +331,18 @@ class TrackingEngine(private val context: Context) {
                     .onFailure { Log.e(TAG, "pose CPU fallback failed", it) }
                     .getOrNull()
                 poseFailureStreak = 0
+            }
+        }
+
+        // Detection intermittently misses a frame (fast motion, partial occlusion, pose stride).
+        // Re-publishing the last real landmarks with a fresh timestamp keeps the avatar moving
+        // smoothly instead of freezing for a frame and snapping back on the next one, which read as
+        // flickering between "the tracked position" and "the last position".
+        if (pose == null) {
+            lastGoodPose?.let { last ->
+                if (frame.tsMs - last.tsMs <= POSE_HOLD_MS) {
+                    pose = PoseResult(frame.tsMs, last.landmarks, last.worldLandmarks)
+                }
             }
         }
 
@@ -413,12 +437,15 @@ class TrackingEngine(private val context: Context) {
 
         var healthy = true
         var reason: String? = null
-        if (stablePose == null) {
+        // Staleness is measured from the last *real* detection, so a held pose does not keep the
+        // safety gate from freezing the output once the person is gone.
+        if (stablePose == null || !poseDetected) {
             if (lastPoseTs != 0L && SystemClock.uptimeMillis() - lastResultMonotonicMs > STALE_MS) {
                 healthy = false
                 reason = "pose_timeout"
             }
-        } else {
+        }
+        if (stablePose != null && poseDetected) {
             val confidence = trackingFrame.confidence()
             // hip center warp detection (normalized view space)
             val hipX = (stablePose.landmarks[23].x + stablePose.landmarks[24].x) / 2f

@@ -105,9 +105,10 @@ class AvatarController(val renderer: AvatarRenderer) {
             }
         }
         // Face pose carries head pitch/roll (the pose landmarks cannot), so apply it before the
-        // first rig.evaluate() of this frame.
+        // first rig.evaluate() of this frame. Always call it (null when no face) so the fallback
+        // latch can count how long the face has been missing.
+        rigger.applyFace(tracking?.face?.headRotation)
         tracking?.face?.let { face ->
-            rigger.applyFace(face.headRotation)
             ExpressionMapper.map(face, exprWeights)
             renderer.setExpressionWeights(exprWeights)
         }

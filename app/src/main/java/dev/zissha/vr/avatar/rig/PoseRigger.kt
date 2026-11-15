@@ -151,7 +151,11 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
      * @param cameraHeight world-space Y of the scene camera
      */
     fun applyPose(pose: PoseResult, viewWidth: Float, viewHeight: Float, cameraHeight: Float, dt: Float) {
-        rig.resetOverrides()
+        // NOTE: overrides are deliberately NOT cleared every frame. When a landmark dips below the
+        // visibility threshold for a single frame, the affected bone used to fall back to its rest
+        // transform and then snap back on the next frame, which looked like flickering between the
+        // tracked pose and the rest pose. Keeping the last valid override makes the pose hold
+        // through dropouts; every part that does have data still overwrites its bones each frame.
         val lm = pose.landmarks
         val w = pose.worldLandmarks
         val conv = rig.viewToAvatar
@@ -198,7 +202,10 @@ class PoseRigger(doc: GltfDocument, vrm: VrmData) {
                 targetScale = (personTorso / restTorsoLength).coerceIn(0.25f, 3.5f) * scaleMultiplier
             }
         }
-        if (targetScale == null && shouldersOk && avatarShoulderWidth > 1e-4f) {
+        // Only fall back to the shoulder-width estimate before a torso measurement has ever been
+        // available: switching between the two estimates every time the hips blink out made the
+        // avatar's size (and therefore its position) jump back and forth.
+        if (targetScale == null && !scaleInitialized && shouldersOk && avatarShoulderWidth > 1e-4f) {
             val sdx = (lm[11].x - lm[12].x) * viewWidth
             val sdy = (lm[11].y - lm[12].y) * viewHeight
             val personShoulderWorld = kotlin.math.hypot(sdx.toDouble(), sdy.toDouble()).toFloat()
